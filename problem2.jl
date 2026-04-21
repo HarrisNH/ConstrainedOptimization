@@ -85,8 +85,26 @@ function generate_test_problem(n, m_a)
     
  
     return H, g, A, b_l, b_u, x_l, x_u, x
- end
+end
  
+function generate_random_test_problem(n,alpha,density) # following MATLAB implementation 
+    m = 10 * n
+
+    A = sprandn(n, m, density)
+
+    b_l = -rand(m)
+    b_u = rand(m)
+
+    M = sprand(n, n, density)
+    H = M * M' + alpha * I
+    g = randn(n)
+
+    x_l = -ones(n)
+    x_u = ones(n)
+
+    return H, g, b_l, b_u, x_l, x_u, nothing
+end
+
 
 function plot_qp(H, g, A, b_l, b_u, x_l, x_u; x_star=nothing)
     # ensure dimension is 2
@@ -174,8 +192,8 @@ end
 # b_u = [1.4066347634539955]
 # x_l = [-0.8632981723875321, -4.512339025674606]
 # x_u = [2.717188398215795, -0.694963544245569]
-n_dim = 23
-n_con = 30
+n_dim = 30
+n_con = 10
 H, g, A, b_l, b_u, x_l, x_u, x0 = generate_test_problem(n_dim, n_con) # TODO: remove x0 feasible 
 #println("H: $H")
 #println("g: $g") 
@@ -205,9 +223,10 @@ function convex_active_set_solver(A, b, G, g, x0)
     
     # find feasible point (initial point)
 
-    tol = 1e-14
-    err = 1
+    tol = 1e-7
+    err = 1 #?
     k = 1
+    max_number_of_iterations = 10_000
     
     n_vars, m_const = size(A)
     x_list = [x0]
@@ -218,50 +237,43 @@ function convex_active_set_solver(A, b, G, g, x0)
     # display(b)
     # display(A' * x0 .== b)
     # println("n_vars, m_const = $n_vars, $m_const")
-
+    # active_tolerance = tol 
+    # W_set = Array(1:m_const)[A' * x0 - b .< active_tolerance] #index of working set
+    # W_not_set = Array(1:m_const)[A' * x0 - b .> active_tolerance]
     W_set = Array(1:m_const)[A' * x0 .== b] #index of working set
     W_not_set = Array(1:m_const)[A' * x0 .!= b]
-    
-    converged = false 
-    #TODO: right now it only checks if k < 100 since we DO NOT update err and converged!!
-    # while err > tol && k < 10_000 && !converged
-    while k < 50_000
-        # solve the equality constraint
 
-        # println("W_set = ")
-        # display(W_set)
+    converged = false 
+    while !converged && k < max_number_of_iterations
+        # solve the equality constraint
         A_W = A[:, W_set]
+
         x_k = x_list[end]
         k += 1
 
-        # display(A_W)
-        # println(size(A_W))
         n_W = size(A_W, 2)
-        # println("det(G) = $(det(G))")
         KKT_matrix = [
             G       -A_W; 
             -A_W'   zeros(n_W, n_W) # check A.size[2] 
         ]
-        # println("det(KKT_matrix) = $(det(KKT_matrix))")
-        # display(KKT_matrix)
-
 
         KKT_rhs = -[
             G * x_k + g; 
-            zeros(n_W) # again(!) check A.size[2]
+            zeros(n_W) 
         ] 
 
         res = KKT_matrix \ KKT_rhs
 
-        p = res[1: n_vars]
+        p = res[1:n_vars]
         mu = res[n_vars+1:end]
+        #display(mu)
 
         if norm(p, Inf) <= tol #||p^*|| = 0 
             if all(x -> x >= 0, mu)
                 x_sol = x_k 
                 mu_sol = mu # should only be those in W that are us rest should be zero
                 push!(x_list, x_sol)
-                # break # feasible solution is found
+                converged = true
                 break 
             else
                 index_drop = argmin(mu)
@@ -275,33 +287,22 @@ function convex_active_set_solver(A, b, G, g, x0)
             end 
         else 
             # compute distance 
-
             new_set = A' * p .< 0 .&& in.(1:m_const, Ref(W_not_set))
             b_nw = b[new_set]
             A_nw = A[:, new_set]
             
-            # println("shape b_nw: $(size(b_nw))")
             result = (b_nw - A_nw' * x_k) ./ (A_nw' * p)
             alpha = minimum(result)
             j = argmin(result) 
-
             
             if alpha < 1
                 push!(x_list, x_k + alpha * p)
                 # add constraint to working set
-                # println("new_set", new_set, j)
                 new_constraint_index_global = findall(new_set)[j] #findall returns index of all 
                 push!(W_set, new_constraint_index_global)
                 sort!(W_set)
 
-                filter!(x -> x != new_constraint_index_global, W_not_set)  # ✅ add this
-
-
-                #A_W_candidate = A[:, [W_set; new_constraint_index_global]]
-                #if rank(A_W_candidate) > rank(A_W)
-                #    push!(W_set, new_constraint_index_global)
-                #    sort!(W_set)
-                #end
+                filter!(x -> x != new_constraint_index_global, W_not_set) 
             else
                 push!(x_list, x_k + p)
                 # keep working set constant to what it currently is
@@ -309,27 +310,21 @@ function convex_active_set_solver(A, b, G, g, x0)
         end
         
         # update converged 
-        # rL = G * x_list[end] + g - A * mu 
- 
-        converged = false 
-    end
+        rL = G * x_list[end] + g - A_W * mu
+        rx = x_list[end] - x_list[end-1]
         
+        converged = norm(rL, Inf) < tol && norm(rx, Inf) < tol && norm(mu, Inf) < tol 
+    end
+    
     return x_list[end], k#, mu_sol 
 end
 
 
 I_matrix = Matrix{Float64}(I, n_dim, n_dim)
-# println("I_matrix = ")
-# display(I_matrix)
 A_hat = [A -A I_matrix -I_matrix]
-#print(A_hat)
 b_hat = [b_l; -b_u; x_l; -x_u]
-# println("Starting active set solver w.")
-# println("A_shape: $(size(A_hat))")
-# println("b_shape: $(size(b_hat))")
 x_sol, k = convex_active_set_solver(A_hat, b_hat, H, g, x0)
 x_sol, k = @time convex_active_set_solver(A_hat, b_hat, H, g, x0)
 println("x_sol = $x_sol")
 println("k: $k")
-# display(mu_sol)
 display(norm(x_sol - library_solution, Inf))
