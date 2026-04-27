@@ -3,7 +3,7 @@ using JuMP
 using Ipopt
 using Random, Distributions
 using Plots
-include("problem2_presolve.jl")
+
 # c. 
 """
 We consider the *convex* QP in the form 
@@ -85,26 +85,8 @@ function generate_test_problem(n, m_a)
     
  
     return H, g, A, b_l, b_u, x_l, x_u, x
-end
+ end
  
-function generate_random_test_problem(n,alpha,density) # following MATLAB implementation 
-    m = 10 * n
-
-    A = sprandn(n, m, density)
-
-    b_l = -rand(m)
-    b_u = rand(m)
-
-    M = sprand(n, n, density)
-    H = M * M' + alpha * I
-    g = randn(n)
-
-    x_l = -ones(n)
-    x_u = ones(n)
-
-    return H, g, b_l, b_u, x_l, x_u, nothing
-end
-
 
 function plot_qp(H, g, A, b_l, b_u, x_l, x_u; x_star=nothing)
     # ensure dimension is 2
@@ -192,8 +174,8 @@ end
 # b_u = [1.4066347634539955]
 # x_l = [-0.8632981723875321, -4.512339025674606]
 # x_u = [2.717188398215795, -0.694963544245569]
-n_dim = 30
-n_con = 20
+n_dim = 2
+n_con = 3
 H, g, A, b_l, b_u, x_l, x_u, x0 = generate_test_problem(n_dim, n_con) # TODO: remove x0 feasible 
 #println("H: $H")
 #println("g: $g") 
@@ -237,44 +219,59 @@ function convex_active_set_solver(A, b, G, g, x0)
     # display(b)
     # display(A' * x0 .== b)
     # println("n_vars, m_const = $n_vars, $m_const")
-    # active_tolerance = tol 
-    # W_set = Array(1:m_const)[A' * x0 - b .< active_tolerance] #index of working set
-    # W_not_set = Array(1:m_const)[A' * x0 - b .> active_tolerance]
+
     W_set = Array(1:m_const)[A' * x0 .== b] #index of working set
     W_not_set = Array(1:m_const)[A' * x0 .!= b]
+    
+    rL_history = Float64[]
+    rx_history = Float64[]
+    mu_history = Float64[]
+    obj_history = Float64[]
+    W_size_history = Int[]
+
 
     converged = false 
+    #TODO: right now it only checks if k < 100 since we DO NOT update err and converged!!
     while !converged && k < max_number_of_iterations
         # solve the equality constraint
+
+        # println("W_set = ")
+        # display(W_set)
         A_W = A[:, W_set]
 
         x_k = x_list[end]
         k += 1
 
+        # display(A_W)
+        # println(size(A_W))
         n_W = size(A_W, 2)
+        # println("det(G) = $(det(G))")
         KKT_matrix = [
             G       -A_W; 
             -A_W'   zeros(n_W, n_W) # check A.size[2] 
         ]
+        # println("det(KKT_matrix) = $(det(KKT_matrix))")
+        # display(KKT_matrix)
+
 
         KKT_rhs = -[
             G * x_k + g; 
-            zeros(n_W) 
+            zeros(n_W) # again(!) check A.size[2]
         ] 
 
         res = KKT_matrix \ KKT_rhs
 
-        p = res[1:n_vars]
+        p = res[1: n_vars]
         mu = res[n_vars+1:end]
-        #display(mu)
 
         if norm(p, Inf) <= tol #||p^*|| = 0 
             if all(x -> x >= 0, mu)
                 x_sol = x_k 
                 mu_sol = mu # should only be those in W that are us rest should be zero
                 push!(x_list, x_sol)
-                converged = true
+                # break # feasible solution is found
                 break 
+                converged = true
             else
                 index_drop = argmin(mu)
                 global_index = W_set[index_drop]
@@ -291,6 +288,7 @@ function convex_active_set_solver(A, b, G, g, x0)
             b_nw = b[new_set]
             A_nw = A[:, new_set]
             
+            # println("shape b_nw: $(size(b_nw))")
             result = (b_nw - A_nw' * x_k) ./ (A_nw' * p)
             alpha = minimum(result)
             j = argmin(result) 
@@ -298,11 +296,18 @@ function convex_active_set_solver(A, b, G, g, x0)
             if alpha < 1
                 push!(x_list, x_k + alpha * p)
                 # add constraint to working set
+                # println("new_set", new_set, j)
                 new_constraint_index_global = findall(new_set)[j] #findall returns index of all 
                 push!(W_set, new_constraint_index_global)
                 sort!(W_set)
 
                 filter!(x -> x != new_constraint_index_global, W_not_set) 
+
+                #A_W_candidate = A[:, [W_set; new_constraint_index_global]]
+                #if rank(A_W_candidate) > rank(A_W)
+                #    push!(W_set, new_constraint_index_global)
+                #    sort!(W_set)
+                #end
             else
                 push!(x_list, x_k + p)
                 # keep working set constant to what it currently is
@@ -310,40 +315,77 @@ function convex_active_set_solver(A, b, G, g, x0)
         end
         
         # update converged 
+        # println("G has size $(size(G))")
+        # println("A_W has size $(size(A_W))")
+        # println("x has size $(size(x_list[end]))")
+        # println("mu has size $(size(mu))")
         rL = G * x_list[end] + g - A_W * mu
         rx = x_list[end] - x_list[end-1]
-        
-        converged = norm(rL, Inf) < tol && norm(rx, Inf) < tol && norm(mu, Inf) < tol 
+ 
+        # converged = norm(rL, Inf) < tol && norm(rx, Inf) < tol && norm(mu, Inf) < tol 
+        converged = norm(mu, Inf) < tol 
+
+
+        # Inside the while loop, after computing the relevant values:
+        push!(obj_history, 0.5 * x_list[end]' * G * x_list[end] + g' * x_list[end])
+        push!(rL_history, norm(rL, Inf))
+        push!(rx_history, norm(rx, Inf))
+        push!(mu_history, norm(mu, Inf))
+        push!(W_size_history, length(W_set))
+
     end
-    
-    return x_list[end], k#, mu_sol 
+        
+    #println("mu_sol = $mu_sol")
+    #return x_list[end], k#, mu_sol 
+    # Return these at the end:
+    return x_list[end], k, rL_history, rx_history, mu_history, obj_history, W_size_history
 end
 
 
 I_matrix = Matrix{Float64}(I, n_dim, n_dim)
-
-
+# println("I_matrix = ")
+# display(I_matrix)
 A_hat = [A -A I_matrix -I_matrix]
+#print(A_hat)
 b_hat = [b_l; -b_u; x_l; -x_u]
-x_sol, k = convex_active_set_solver(A_hat, b_hat, H, g, x0)
-x_sol, k = @time convex_active_set_solver(A_hat, b_hat, H, g, x0)
-println("x_sol = $x_sol")
-println("k: $k")
-display(norm(x_sol - library_solution, Inf))
+# println("Starting active set solver w.")
+# println("A_shape: $(size(A_hat))")
+# println("b_shape: $(size(b_hat))")
+#x_sol, k = convex_active_set_solver(A_hat, b_hat, H, g, x0)
+#x_sol, k, rL_history, rx_history, mu_history, obj_history, W_size_history = @time convex_active_set_solver(A_hat, b_hat, H, g, x0)
+#println("x_sol = $x_sol")
+#println("k: $k")
+# display(mu_sol)
+#display(norm(x_sol - library_solution, Inf))
 
-# g and h 
-function convex_dual_interior_point_solver(H, g, C, d, s, z)
-    """ 
-    Solves 
-    min 1/2 x' H x + g' x 
-    s.t. C' x >= d
+using Plots
 
-    Call with (s, z) = (1, ..., 1). 
-    """ 
+# After running your solver:
 
-    # see 6.5, slide 6 
-    S = diagm(s)
-    Z = diagm(z)
+x_sol, iters, rL_hist, rx_hist, mu_hist, obj_hist, W_hist = convex_active_set_solver(A_hat, b_hat, H, g, x0)
+println(x_sol)
+println(iters)
 
-    _, nc = size(C) 
-end
+# Create convergence plots
+p1 = plot(1:length(rL_hist), rL_hist, yscale=:log10, 
+          label="||∇L||∞", xlabel="Iteration", ylabel="Residual", 
+          title="Primal Residual", lw=2)
+savefig("p1.png")
+p2 = plot(1:length(rx_hist), rx_hist, yscale=:log10,
+          label="||Δx||∞", xlabel="Iteration", ylabel="Step Size",
+          title="Change in x", lw=2)
+savefig("p2.png")
+p3 = plot(1:length(mu_hist), mu_hist, yscale=:log10,
+          label="||μ||∞", xlabel="Iteration", ylabel="Dual Norm",
+          title="Dual Variables", lw=2)
+savefig("p3.png")
+p4 = plot(1:length(obj_hist), obj_hist,
+          label="f(x)", xlabel="Iteration", ylabel="Objective",
+          title="Objective Function", lw=2)
+savefig("p.png")
+p5 = plot(1:length(W_hist), W_hist,
+          label="|W|", xlabel="Iteration", ylabel="# Active Constraints",
+          title="Working Set Size", lw=2, marker=:circle)
+
+# Combine all plots
+plot(p1, p2, p3, p4, p5, layout=(3,2), size=(1000, 900))
