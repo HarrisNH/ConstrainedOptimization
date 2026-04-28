@@ -3,6 +3,7 @@ using JuMP
 using Ipopt
 using Random, Distributions
 using Plots
+
 include("problem2_presolve.jl")
 # c. 
 """
@@ -320,18 +321,20 @@ function convex_active_set_solver(A, b, G, g, x0)
 end
 
 
-I_matrix = Matrix{Float64}(I, n_dim, n_dim)
+# I_matrix = Matrix{Float64}(I, n_dim, n_dim)
 
 
-A_hat = [A -A I_matrix -I_matrix]
-b_hat = [b_l; -b_u; x_l; -x_u]
-x_sol, k = convex_active_set_solver(A_hat, b_hat, H, g, x0)
-x_sol, k = @time convex_active_set_solver(A_hat, b_hat, H, g, x0)
-println("x_sol = $x_sol")
-println("k: $k")
-display(norm(x_sol - library_solution, Inf))
+# A_hat = [A -A I_matrix -I_matrix]
+# b_hat = [b_l; -b_u; x_l; -x_u]
+# x_sol, k = convex_active_set_solver(A_hat, b_hat, H, g, x0)
+# x_sol, k = @time convex_active_set_solver(A_hat, b_hat, H, g, x0)
+# println("x_sol = $x_sol")
+# println("k: $k")
+# display(norm(x_sol - library_solution, Inf))
 
 # g and h 
+print("\n\n\n\n")
+println("h)")
 function convex_dual_interior_point_solver(H, g, C, d, s, z)
     """ 
     Solves 
@@ -347,3 +350,285 @@ function convex_dual_interior_point_solver(H, g, C, d, s, z)
 
     _, nc = size(C) 
 end
+
+
+
+
+
+
+
+function primal_dual_qp_ineq(
+    H::AbstractMatrix,
+    g::AbstractVector,
+    C::AbstractMatrix,
+    d::AbstractVector;
+    x0=nothing,
+    z0=nothing,
+    s0=nothing,
+    tol=1e-8,
+    maxiter=500,
+    η=0.995
+)
+    n = size(H, 1)
+    mc = size(C, 2)  # Number of inequality constraints
+    
+    # Initialize
+    x = x0 === nothing ? zeros(n) : copy(x0)
+    z = z0 === nothing ? ones(mc) : copy(z0)
+    s = s0 === nothing ? ones(mc) : copy(s0)
+    
+    # Ensure strictly positive
+    z .= max.(z, 1.0)
+    s .= max.(s, 1.0)
+    
+    e = ones(mc)
+    
+    history = Dict(
+        :μ => Float64[],
+        :dual_res => Float64[],
+        :primal_res => Float64[],
+        :obj => Float64[]
+    )
+    
+    for k in 1:maxiter
+        # Compute residuals
+        rL  = H * x + g - C * z  
+        rC  = s + d - C' * x
+        rsz = s .* z
+        μ   = dot(s, z) / mc
+        
+        # Check convergence
+        dual_res   = norm(rL, Inf)
+        primal_res = norm(rC, Inf)
+        obj        = 0.5 * dot(x, H * x) + dot(g, x)
+        
+        push!(history[:μ], μ)
+        push!(history[:dual_res], dual_res)
+        push!(history[:primal_res], primal_res)
+        push!(history[:obj], obj)
+        
+        if maximum([dual_res, primal_res, μ]) < tol
+            return (
+                x = x,
+                z = z,
+                s = s,
+                status = :optimal,
+                iter = k,
+                history = history
+            )
+            break
+        end
+        
+        # affine Direction 
+        S_inv_Z = Diagonal(z ./ s)  # S^{-1}Z
+        Hbar = H + C * S_inv_Z * C'
+
+        # Cholesky
+        F = cholesky(Symmetric(Hbar))
+        
+        # Solve for affine direction
+        r_hat_L = rL - C * S_inv_Z * (rC - rsz ./ z)
+        dx_aff = -(F \ r_hat_L)
+        
+        # Back-substitution
+        dz_aff = -S_inv_Z * C' * dx_aff + S_inv_Z * (rC - rsz ./ z)
+        
+        ds_aff = -(rsz ./ z) - (s ./ z) .* dz_aff
+        
+        # Maximum step length
+        α_aff = compute_max_step(z, s, dz_aff, ds_aff, 1.0) # multiplies with 1 so all good! 
+        
+        # Affine duality gap
+        μ_aff = dot(z + α_aff * dz_aff, s + α_aff * ds_aff) / mc
+        
+        # Centering parameter
+        σ = (μ_aff / μ)^3
+        
+        # === Centering-Corrected Direction ===
+        rsz_bar = rsz + diagm(ds_aff) * diagm(dz_aff) * e .- σ * μ * e  
+        
+        r_hat_L_bar = rL - C * S_inv_Z * (rC - rsz_bar ./ z)
+        dx = -(F \ r_hat_L_bar)
+        
+        dz = -S_inv_Z * (C' * dx) + S_inv_Z * (rC - rsz_bar ./ z)
+        ds = -(rsz_bar ./ z) - (s ./ z) .* dz
+        
+        # Maximum step length with damping
+        α = compute_max_step(z, s, dz, ds, η)
+        
+        # Update
+        x .+= α * dx 
+        z .+= α * dz
+        s .+= α * ds
+        
+        z .= max.(z, 1e-14)
+        s .= max.(s, 1e-14)
+
+        println("x[$k] = $x")
+    end
+    
+    return (
+        x = x,
+        z = z,
+        s = s,
+        status = :maxiter,
+        iter = maxiter,
+        history = history
+    )
+end
+
+function compute_max_step(z, s, dz, ds, η)
+    # Find maximum α such that z + α*dz ≥ 0 and s + α*ds ≥ 0
+    
+
+    neg_dz = dz .< 0
+    if any(neg_dz)
+        α_z = minimum(-z[neg_dz] ./ dz[neg_dz])
+    else
+        α_z = Inf
+    end
+    
+    neg_ds = ds .< 0
+    if any(neg_ds)
+        α_s = minimum(-s[neg_ds] ./ ds[neg_ds])
+    else
+        α_s = Inf
+    end
+    
+    α_max = min(1.0, α_z, α_s)
+    return η * α_max
+end
+
+
+function setup_qp_with_bounds(H, g, A, b_l, b_u, x_l, x_u)
+    n = size(H, 1)      
+    m = length(b_l)    
+    
+    C_transpose = [
+        A'           # A'x ≥ b_l
+        -A'          # -A'x ≥ -b_u 
+        Matrix(I, n, n)   # x ≥ x_l
+        -Matrix(I, n, n)  # -x ≥ -x_u 
+    ]
+    
+    # Build d vector
+    d = [
+        b_l
+        -b_u
+        x_l
+        -x_u
+    ]
+    # C is the transpose of C_transpose
+    C = C_transpose'
+    
+    return C, d
+end
+
+
+H = [2.0 0.0; 0.0 2.0]
+g = [-2.0; -5.0]
+A = [1.0 1.0; 1.0 2.0]'  # 2 constraints
+b_l = [5.0; 5.0]
+b_u = [10.0; 10.0]
+x_l = [0.0; 0.0]
+x_u = [100.0; 100.0]
+
+
+function solve_with_commercial(H, g, A, b_l, b_u, x_l, x_u)
+    n = size(H, 1)
+    
+    # Create model
+    model = Model(Ipopt.Optimizer)
+    set_silent(model)  # Suppress output
+    
+    # Variables
+    @variable(model, x_l[i] <= x[i=1:n] <= x_u[i])
+
+    # Objective: ½x'Hx + g'x
+    @objective(model, Min, 0.5 * x' * H * x + g' * x)
+    
+    # General linear constraints: b_l ≤ A'x ≤ b_u
+    @constraint(model, b_l .<= A' * x .<= b_u)
+
+
+    # Solve
+    optimize!(model)
+    
+    # Extract solution
+    return (
+        x = value.(x),
+        status = termination_status(model),
+        obj = objective_value(model),
+        solve_time = solve_time(model)
+    )
+end
+
+
+# ===== Comparison =====
+
+# Your implementation
+C, d = setup_qp_with_bounds(H, g, A, b_l, b_u, x_l, x_u)
+result_custom = primal_dual_qp_ineq(H, g, C, d)
+
+# Commercial solver
+result_commercial = solve_with_commercial(H, g, A, b_l, b_u, x_l, x_u)
+
+# Compare
+println("="^60)
+println("SOLUTION COMPARISON")
+println("="^60)
+println("\nCustom Primal-Dual Interior-Point:")
+println("  Status: ", result_custom.status)
+println("  Iterations: ", result_custom.iter)
+println("  x = ", round.(result_custom.x, digits=6))
+println("  Objective = ", round(0.5 * dot(result_custom.x, H * result_custom.x) + dot(g, result_custom.x), digits=8))
+println("  Final μ = ", round(result_custom.history[:μ][end], sigdigits=3))
+
+println("\nCommercial Solver (Ipopt):")
+println("  Status: ", result_commercial.status)
+println("  x = ", round.(result_commercial.x, digits=6))
+println("  Objective = ", round(result_commercial.obj, digits=8))
+println("  Solve time = ", round(result_commercial.solve_time, digits=4), " seconds")
+
+println("\nDifference:")
+println("  ||x_custom - x_commercial|| = ", norm(result_custom.x - result_commercial.x))
+println("  Objective difference = ", abs(
+    0.5 * dot(result_custom.x, H * result_custom.x) + dot(g, result_custom.x) - 
+    result_commercial.obj
+))
+
+
+p1 = plot(result_custom.history[:μ], 
+          yscale=:log10, 
+          xlabel="Iteration", 
+          ylabel="Duality Gap μ",
+          label="μ",
+          lw=2,
+          marker=:circle,
+          title="Convergence History")
+
+p2 = plot(result_custom.history[:dual_res], 
+          yscale=:log10,
+          xlabel="Iteration", 
+          ylabel="Residual",
+          label="Dual residual",
+          lw=2,
+          marker=:circle)
+plot!(p2, result_custom.history[:primal_res], 
+      label="Primal residual",
+      lw=2,
+      marker=:square)
+
+p3 = plot(result_custom.history[:obj],
+          xlabel="Iteration",
+          ylabel="Objective Value",
+          label="Objective",
+          lw=2,
+          marker=:circle)
+hline!(p3, [result_commercial.obj], 
+       label="Commercial solver",
+       linestyle=:dash,
+       lw=2)
+
+plot(p1, p2, p3, layout=(1,3), size=(1200,400))
+savefig("problem2-h.png")
