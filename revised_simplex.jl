@@ -1,126 +1,75 @@
 using LinearAlgebra
 
-function revised_simplex(A::Matrix{Float64}, b::Vector{Float64}, c::Vector{Float64}, x0)
-    """
-    min c'x 
-    Ax = b
-    x >= 0 
 
-    with x0 as feasible starting point
-    """
-    m, n = size(A)
 
-    B = collect(n-m+1:n) 
-    N = collect(1:n-m)   
+function revised_simplex(A::Matrix{}, b::Vector{}, c::Vector{}, x0::Vector{})
+    m, n = size(A) # constraints, vars
+
+    # Derive basis from x0
     
+    B = findall(x0 .> 1e-10) #basic = loose
+    N = findall(x0 .<= 1e-10) #non-basic = tight = 0
+
+    # Pad basis to size m if needed. So just pick indexes inactive and put in active.
+    if length(B) < m
+        extra = N[1:m-length(B)]
+        append!(B, extra)
+        N = setdiff(1:n, B)
+    end
+
     max_iterations = 1000
-    iteration = 0
-    
-    while iteration < max_iterations
-        iteration += 1
-        
+
+    for iteration in 1:max_iterations
         A_B = A[:, B]
         A_N = A[:, N]
-        
         c_B = c[B]
         c_N = c[N]
-        
-        mu = A_B' \ c_B
-        
-        lambda_N = c_N - A_N' * mu
-        
-        if all(lambda_N .>= -1e-10) 
-            println("Optimal solution found!")
-            
-            # Construct solution
+
+        mu       = A_B' \ c_B
+        lambda_N = c_N - A_N' * mu #1 term impact on objective of c_j going from tight to loose, 2 term impact of tighten loose variable 
+
+        if all(lambda_N .>= -1e-10)
             x = zeros(n)
-            x_B = A_B \ b
-            x[B] = x_B
-            
-            return (
-                optimal = true,
-                x = x,
-                objective = dot(c, x),
-                basis = B,
-                non_basis = N,
-                iterations = iteration
-            )
+            x[B] = A_B \ b
+            return (optimal=true, x=x, objective=dot(c,x), basis=B, iterations=iteration)
         end
-        
-        s = findfirst(lambda_N .< 0)
-        if s === nothing
-            println("No entering variable found (optimality reached)")
-            break
-        end
-        
-        i_s = N[s]
-        
-        a_is = A[:, i_s]
-        h = A_B \ a_is
-        
-        x_B = A_B \ b
-        
-        ratios = Float64[]
-        ratio_indices = Int[]
-        
-        for i in 1:length(h)
-            if h[i] > 1e-10  # h_i > 0
-                push!(ratios, x_B[i] / h[i])
-                push!(ratio_indices, i)
-            end
-        end
-        
-        if isempty(ratios)
-            println("Unbounded problem, no solution")
-            return (
-                optimal = false,
-                unbounded = true,
-                iterations = iteration
-            )
-        end
-        
-        min_ratio_idx = argmin(ratios)
-        j = ratio_indices[min_ratio_idx]
-        alpha = ratios[min_ratio_idx]
-    
-        i_j = B[j]
-        
-        B[j] = i_s
-        N[s] = i_j
-        
-        println("Iteration $iteration: Variable $i_s enters, variable $i_j leaves")
+
+        s = argmin(lambda_N) #pivot rule
+        i_s = N[s] #var to loosen
+        a_is = A[:, i_s] #A col with loosened var
+        h = A_B \ a_is # how other vars must change to keep Ax=b as loosened var increases
+
+        x_B = A_B \ b #current values of original basic vars 
+
+        ratios = [h[i] > 1e-10 ? x_B[i]/h[i] : Inf for i in 1:m] # ratio for each basic var
+        all(isinf, ratios) && return (optimal=false, unbounded=true, iterations=iteration) # if all unbounded, can keep increase new basic var forever, so unbounded problem
+        j    = argmin(ratios) # basic index of first var to become 0 as new basic var is loosened
+        i_j  = B[j] #what is global index of this soon to be non-basic var
+
+        B[j] = i_s #override old basic var index with new
+        N[s] = i_j #override old non-basic var index with new
     end
-    
-    if iteration >= max_iterations
-        println("Maximum iterations reached")
-    end
-    
+    #returns best non-optimal solution found
     x = zeros(n)
-    A_B = A[:, B]
-    x_B = A_B \ b
-    x[B] = x_B
-    
-    return (
-        optimal = false,
-        x = x,
-        objective = dot(c, x),
-        basis = B,
-        non_basis = N,
-        iterations = iteration
-    )
+    x[B] = A[:, B] \ b #basic vars are non-zero
+    return (optimal=false, x=x, objective=dot(c,x), basis=B, iterations=max_iterations)
 end
 
-
 function example_problem()
+    # min C'x
+    #Ax=b
+    #[x;s] >= 0
+
+    A = [1.0  0.0  1.0  0.0 0.0;
+        0.0  1.0  0.0  1.0 0.0;
+        1.0 1.0 0.0 0.0 1.0]
     
-    A = [1.0  1.0  1.0  0.0;
-         2.0  1.0  0.0  1.0]
+    b = [3000.0; 4000.0 ; 5000.0]
     
-    b = [4.0; 6.0]
-    
-    c = [-1.0; -2.0; 0.0; 0.0] 
-    
-    result = revised_simplex(A, b, c)
+    c = [-1.2 ; -1.7; 0 ; 0; 0]
+    # we start origin so slacks = b
+    x0 = [0; 0; b[1]; b[2]; b[3]]
+    result = revised_simplex(A, b, c, x0)
     
     println("\n=== Results ===")
     println("Optimal: ", result.optimal)
@@ -137,57 +86,3 @@ function example_problem()
 end
 
 #example_problem()
-
-
-function revised_simplex_chat(A::Matrix{Float64}, b::Vector{Float64}, c::Vector{Float64}, x0::Vector{Float64})
-    m, n = size(A)
-
-    # Derive basis from x0
-    B = findall(x0 .> 1e-10)
-    N = findall(x0 .<= 1e-10)
-
-    # Pad basis to size m if needed
-    if length(B) < m
-        extra = N[1:m-length(B)]
-        append!(B, extra)
-        N = setdiff(1:n, B)
-    end
-
-    max_iterations = 1000
-
-    for iteration in 1:max_iterations
-        A_B = A[:, B]
-        A_N = A[:, N]
-        c_B = c[B]
-        c_N = c[N]
-
-        mu       = A_B' \ c_B
-        lambda_N = c_N - A_N' * mu
-
-        if all(lambda_N .>= -1e-10)
-            x = zeros(n)
-            x[B] = A_B \ b
-            return (optimal=true, x=x, objective=dot(c,x), basis=B, iterations=iteration)
-        end
-
-        s   = findfirst(lambda_N .< 0)
-        i_s = N[s]
-        h   = A_B \ A[:, i_s]
-        x_B = A_B \ b
-
-        ratios       = [(x_B[i]/h[i], i) for i in 1:m if h[i] > 1e-10]
-        isempty(ratios) && return (optimal=false, unbounded=true, iterations=iteration)
-
-        _, j = argmin(first, ratios) |> x -> ratios[findfirst(r -> r == x, ratios)]
-        # simpler:
-        j    = argmin([h[i] > 1e-10 ? x_B[i]/h[i] : Inf for i in 1:m])
-        i_j  = B[j]
-
-        B[j] = i_s
-        N[s] = i_j
-    end
-
-    x = zeros(n)
-    x[B] = A[:, B] \ b
-    return (optimal=false, x=x, objective=dot(c,x), basis=B, iterations=max_iterations)
-end
