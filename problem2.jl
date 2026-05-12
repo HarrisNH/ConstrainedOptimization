@@ -4,7 +4,9 @@ using Ipopt
 using Random, Distributions
 using Plots
 
+include("helpers.jl")
 include("problem2_presolve.jl")
+include("revised_simplex.jl")
 # c. 
 """
 We consider the *convex* QP in the form 
@@ -15,34 +17,6 @@ s.t. b_l <= A' x <= b_u,
 Since this a convex(!) program then H > 0, 
 that is, H is positive definite. 
 """
-
-# function generate_test_problem(n, m_a)
-#     """
-#     Generates H, g,A, b_l, b_u, x_l, x_u of size n. 
-
-#     H, g, A, b_l, b_u, x_l, x_u = generate_test_problem(n, m_a)
-#     """
-
-#     # TODO: maybe find better numbers 
-#     # and discuss the generation methods
-#     M = rand(Uniform(-1, 1), n, n)
-#     alpha = rand(Uniform(0.5, 2))
-#     H = M * M' .+ alpha # this ensures that H > 0 
-
-#     g = rand(Uniform(-5, 5), n)
-    
-#     b_l = rand(Uniform(-5, 5), m_a)
-#     delta_b = rand(Uniform(0.5, 5), m_a)
-#     b_u = b_l + delta_b
-
-#     x_l = rand(Uniform(-5, 5), n)
-#     delta_x = rand(Uniform(0.5, 5), n)
-#     x_u = x_l + delta_x
-
-#     A = rand(Uniform(-2, 2), n, m_a)
-
-#     return H, g, A, b_l, b_u, x_l, x_u
-# end
 
 function generate_test_problem(n, m_a)
     """
@@ -85,7 +59,8 @@ function generate_test_problem(n, m_a)
     b_u = y .+ diff_Ax
     
  
-    return H, g, A, b_l, b_u, x_l, x_u, x
+    return H, g, A, b_l, b_u, x_l, x_u
+
 end
  
 function generate_random_test_problem(n,alpha,density) # following MATLAB implementation 
@@ -170,45 +145,15 @@ function library_solver(H, g, A, b_l, b_u, x_l, x_u)
     """
     n = size(A)[1]
     model = Model(Ipopt.Optimizer)
+    set_silent(model) 
     @variable(model, x[1:n])
     @constraint(model, b_l .<= A' * x .<= b_u)
     @constraint(model, x_l .<= x .<= x_u)
     @objective(model, Min, 1/2 * x' * H * x + g' * x)
-    optimize!(model)
 
-    return value.(x)
+    t = @elapsed optimize!(model)
+    return value.(x), t
 end
-
-# H = [4 2; 2 6]
-# g = [2, 3]
-# A = [1; 1;;]
-# b_l = [1]
-# b_u = b_l .+ 3
-# x_l = [1, 2]
-# x_u = x_l .+ 3
-# H = [1.7310033470644977 1.3380919827815996; 1.3380919827815996 1.1008601516900915]
-# g = [-3.5636657217994094, -3.0242004638657405]
-# A = [1.4995076809027266; -1.0640380938151917;;]
-# b_l = [-0.023294879434302196]
-# b_u = [1.4066347634539955]
-# x_l = [-0.8632981723875321, -4.512339025674606]
-# x_u = [2.717188398215795, -0.694963544245569]
-n_dim = 30
-n_con = 20
-H, g, A, b_l, b_u, x_l, x_u, x0 = generate_test_problem(n_dim, n_con) # TODO: remove x0 feasible 
-#println("H: $H")
-#println("g: $g") 
-#println("A: $A")
-#println("b_l: $b_l") 
-#println("b_u: $b_u")
-#println("x_l: $x_l")
-#println("x_u: $x_u")
-#println("Number of dimension: $n_dim")
-#println("Number of constraints w. x constraints: $(n_con+n_dim) or $((n_con + n_dim) * 2) in standard form")
-
-library_solution = library_solver(H, g, A, b_l, b_u, x_l, x_u)
-println("library_solution = $library_solution")
-# plot_qp(H, g, A, b_l, b_u, x_l, x_u; x_star=nothing)
 
 # e and f 
 """ 
@@ -320,21 +265,33 @@ function convex_active_set_solver(A, b, G, g, x0)
     return x_list[end], k#, mu_sol 
 end
 
+function solve_convex_problem(H, g, A, b_l, b_u, x_l, x_u, n_dim)
+    #now rewrite to LP standard form to find feasible point:
+    # Ax=b
+    # x >= 0 
 
-# I_matrix = Matrix{Float64}(I, n_dim, n_dim)
+    A_std, b_std, g_std = to_standard_form(g, A, b_l, b_u, x_l, x_u)
+    n_std = length(g_std)
+
+    A_fp, b_fp, g_fp, x0 = fp_standard_form(A_std, b_std)
+    result_fp = revised_simplex(A_fp, b_fp, g_fp, x0)
+    if !result_fp.optimal
+        print(result_fp)
+        error("Phase 1 failed - problem may be infeasible")
+    end
+    x0_shifted = result_fp.x[1:size(H)[1]]
+    x0_true = x0_shifted + x_l
+
+    I_matrix = Matrix{Float64}(I, n_dim, n_dim)
 
 
-# A_hat = [A -A I_matrix -I_matrix]
-# b_hat = [b_l; -b_u; x_l; -x_u]
-# x_sol, k = convex_active_set_solver(A_hat, b_hat, H, g, x0)
-# x_sol, k = @time convex_active_set_solver(A_hat, b_hat, H, g, x0)
-# println("x_sol = $x_sol")
-# println("k: $k")
-# display(norm(x_sol - library_solution, Inf))
+    A_hat = [A -A I_matrix -I_matrix]
+    b_hat = [b_l; -b_u; x_l; -x_u]
+    # x_sol, k = convex_active_set_solver(A_hat, b_hat, H, g, x0)
+    x_sol, k = convex_active_set_solver(A_hat, b_hat, H, g, x0_true)
+    return x_sol, k
+end
 
-# g and h 
-print("\n\n\n\n")
-println("h)")
 function convex_dual_interior_point_solver(H, g, C, d, s, z)
     """ 
     Solves 
@@ -350,9 +307,6 @@ function convex_dual_interior_point_solver(H, g, C, d, s, z)
 
     _, nc = size(C) 
 end
-
-
-
 
 
 
@@ -463,8 +417,6 @@ function primal_dual_qp_ineq(
         
         z .= max.(z, 1e-14)
         s .= max.(s, 1e-14)
-
-        println("x[$k] = $x")
     end
     
     return (
@@ -525,15 +477,6 @@ function setup_qp_with_bounds(H, g, A, b_l, b_u, x_l, x_u)
 end
 
 
-H = [2.0 0.0; 0.0 2.0]
-g = [-2.0; -5.0]
-A = [1.0 1.0; 1.0 2.0]'  # 2 constraints
-b_l = [5.0; 5.0]
-b_u = [10.0; 10.0]
-x_l = [0.0; 0.0]
-x_u = [100.0; 100.0]
-
-
 function solve_with_commercial(H, g, A, b_l, b_u, x_l, x_u)
     n = size(H, 1)
     
@@ -552,26 +495,51 @@ function solve_with_commercial(H, g, A, b_l, b_u, x_l, x_u)
 
 
     # Solve
-    optimize!(model)
+    t = @elapsed optimize!(model)
     
     # Extract solution
     return (
-        x = value.(x),
+        x = value.(x), t = t,
         status = termination_status(model),
         obj = objective_value(model),
         solve_time = solve_time(model)
     )
 end
+## SETUP PROBLEM
+n_dim = 100 # x vars
+n_con = 10 # n constraints 
+
+H, g, A, b_l, b_u, x_l, x_u = generate_test_problem(n_dim, n_con) # TODO: remove x0 feasible 
+
+
+println("Starting library solver")
+result_commercial = solve_with_commercial(H, g, A, b_l, b_u, x_l, x_u)
+t_lib = result_commercial.solve_time
+
+println("Starting our primal active set solver")
+timed_result = @timed solve_convex_problem(H, g, A, b_l, b_u, x_l, x_u, n_dim)
+x_sol, k = timed_result.value
+t_our = timed_result.time
+# println("x_sol:", x_sol)
+# println("x_sol = $x_sol")
+println("iterations by our solver: $k")
+println("diff between our solver and library solver")
+display(norm(x_sol - result_commercial.x, Inf))
+println("Time used by our solver: $(t_our), Time used by lib solver: $(t_lib)")
+
+# g and h 
+print("\n\n\n\n")
+println("h)")
 
 
 # ===== Comparison =====
 
-# Your implementation
+# Our implementation
+println("Starting our primal dual interior point solver")
 C, d = setup_qp_with_bounds(H, g, A, b_l, b_u, x_l, x_u)
-result_custom = primal_dual_qp_ineq(H, g, C, d)
-
-# Commercial solver
-result_commercial = solve_with_commercial(H, g, A, b_l, b_u, x_l, x_u)
+timed_result  = @timed primal_dual_qp_ineq(H, g, C, d)
+result_custom = timed_result.value
+t_our = timed_result.time
 
 # Compare
 println("="^60)
@@ -580,13 +548,12 @@ println("="^60)
 println("\nCustom Primal-Dual Interior-Point:")
 println("  Status: ", result_custom.status)
 println("  Iterations: ", result_custom.iter)
-println("  x = ", round.(result_custom.x, digits=6))
 println("  Objective = ", round(0.5 * dot(result_custom.x, H * result_custom.x) + dot(g, result_custom.x), digits=8))
 println("  Final μ = ", round(result_custom.history[:μ][end], sigdigits=3))
+println(" Time spent = $(t_our)")
 
 println("\nCommercial Solver (Ipopt):")
 println("  Status: ", result_commercial.status)
-println("  x = ", round.(result_commercial.x, digits=6))
 println("  Objective = ", round(result_commercial.obj, digits=8))
 println("  Solve time = ", round(result_commercial.solve_time, digits=4), " seconds")
 
@@ -596,6 +563,7 @@ println("  Objective difference = ", abs(
     0.5 * dot(result_custom.x, H * result_custom.x) + dot(g, result_custom.x) - 
     result_commercial.obj
 ))
+
 
 
 p1 = plot(result_custom.history[:μ], 
