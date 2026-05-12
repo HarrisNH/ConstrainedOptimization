@@ -181,8 +181,8 @@ function convex_active_set_solver(A, b, G, g, x0)
             G * x_k + g; 
             zeros(n_W) 
         ] 
-        #res = LDL_solver(KKT_matrix, KKT_rhs)
-        res = KKT_matrix \ KKT_rhs
+        res = LDL_solver(KKT_matrix, KKT_rhs)
+        #res = KKT_matrix \ KKT_rhs
         #print(norm(res1-res,Inf))
         p = res[1:n_vars]
         mu = res[n_vars+1:end]
@@ -191,7 +191,7 @@ function convex_active_set_solver(A, b, G, g, x0)
         if norm(p, Inf) <= tol #||p^*|| = 0 
             if all(x -> x >= 0, mu)
                 x_sol = x_k 
-                mu_sol = mu # should only be those in W that are us rest should be zero
+                mu_sol = mu # should only be those in W that are non-zero rest should be zero
                 push!(x_list, x_sol)
                 converged = true
                 break 
@@ -473,12 +473,13 @@ function solve_with_commercial(H, g, A, b_l, b_u, x_l, x_u)
         x = value.(x),
         status = termination_status(model),
         obj = objective_value(model),
-        solve_time = solve_time(model)
+        solve_time = solve_time(model),
+        iter = MOI.get(model, MOI.BarrierIterations())
     )
 end
 ## SETUP PROBLEM
-n_dim = 20 # x vars
-n_con = 10 # n constraints 
+n_dim = 100 # x vars
+n_con = 100 # n constraints 
 
 H, g, A, b_l, b_u, x_l, x_u = generate_test_problem(n_dim, n_con) # TODO: remove x0 feasible 
 
@@ -487,42 +488,43 @@ println("Starting library solver")
 result_commercial = solve_with_commercial(H, g, A, b_l, b_u, x_l, x_u)
 t_lib = result_commercial.solve_time
 
-println("Starting our primal active set solver")
-timed_result = @timed solve_convex_problem(H, g, A, b_l, b_u, x_l, x_u, n_dim)
-x_sol, k, converged_active = timed_result.value
-t_our = timed_result.time
+# println("Starting our primal active set solver")
+# timed_result = @timed solve_convex_problem(H, g, A, b_l, b_u, x_l, x_u, n_dim)
+# x_sol, k, converged_active = timed_result.value
+# t_act = timed_result.time
 
 
 
 
-# Our implementation
-println("Starting our primal dual interior point solver")
-C, d = setup_qp_with_bounds(H, g, A, b_l, b_u, x_l, x_u)
-timed_result  = @timed primal_dual_qp_ineq(H, g, C, d)
-result_custom = timed_result.value
-t_our = timed_result.time
+# # Our implementation
+# println("Starting our primal dual interior point solver")
+# C, d = setup_qp_with_bounds(H, g, A, b_l, b_u, x_l, x_u)
+# timed_result  = @timed primal_dual_qp_ineq(H, g, C, d)
+# result_custom = timed_result.value
+# t_int = timed_result.time
 
 # Compare
 println("="^60)
 println("SOLUTION COMPARISON")
 println("="^60)
-println("\nCustom Primal Active-Set:")
-println("  Status: Converged = $(converged_active)")
-println("  Iterations: ", k)
-println("  Objective = ", round(0.5 * dot(x_sol, H * x_sol) + dot(g, x_sol), digits=8))
-println("  ||x - x_commercial|| = ", round(norm(x_sol - result_commercial.x, Inf), sigdigits=3))
-println("  Time spent = $(t_our)")
+# println("\nCustom Primal Active-Set:")
+# println("  Status: Converged = $(converged_active)")
+# println("  Iterations: ", k)
+# println("  Objective = ", round(0.5 * dot(x_sol, H * x_sol) + dot(g, x_sol), digits=8))
+# println("  ||x - x_commercial|| = ", round(norm(x_sol - result_commercial.x, Inf), sigdigits=3))
+# println("  Time spent = $(t_act)")
 
 
-println("\nCustom Primal-Dual Interior-Point:")
-println("  Status: ", result_custom.status)
-println("  Iterations: ", result_custom.iter)
-println("  Objective = ", round(0.5 * dot(result_custom.x, H * result_custom.x) + dot(g, result_custom.x), digits=8))
-println("  Final μ = ", round(result_custom.history[:μ][end], sigdigits=3))
-println(" Time spent = $(t_our)")
+# println("\nCustom Primal-Dual Interior-Point:")
+# println("  Status: ", result_custom.status)
+# println("  Iterations: ", result_custom.iter)
+# println("  Objective = ", round(0.5 * dot(result_custom.x, H * result_custom.x) + dot(g, result_custom.x), digits=8))
+# println("  Final μ = ", round(result_custom.history[:μ][end], sigdigits=3))
+# println(" Time spent = $(t_int)")
 
 println("\nCommercial Solver (Ipopt):")
 println("  Status: ", result_commercial.status)
+println("  Iterations: ", result_commercial.iter)
 println("  Objective = ", round(result_commercial.obj, digits=8))
 println("  Solve time = ", round(result_commercial.solve_time, digits=4), " seconds")
 
