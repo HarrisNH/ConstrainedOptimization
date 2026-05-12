@@ -3,12 +3,6 @@ using JuMP
 using Ipopt
 using Random, Distributions
 
-# 3. Test problem 
-n = 100
-alpha = 0.5
-density = 0.15
-beta = 0.75
-flag = "sparse"
 
 function percent_matrix(distribution, density, n, m)
     A = zeros(n,m)
@@ -107,34 +101,43 @@ function EqualityQPSolver(H, g, A, b, solver)
     return x, lambda
 end
 
-H_sparse, g, A_sparse, b = RandomEQP(5, 0.5, 0.5, 0.5, "sparse")
+if abspath(PROGRAM_FILE) == @__FILE__
+    # 3. Test problem 
+    n = 100
+    alpha = 0.5
+    density = 0.15
+    beta = 0.75
+    flag = "sparse"
 
-KKT, rhs = construct_KKT(H_sparse, g, A_sparse, b)
-println("eigvals = ", eigvals(Symmetric(Matrix(KKT))))
-println("KKT matrix")
-println(KKT)
+    H_sparse, g, A_sparse, b = RandomEQP(5, 0.5, 0.5, 0.5, "sparse")
 
-println("computing sparse")
-x_sparse, lambda_sparse = EqualityQPSolver(H_sparse, g, A_sparse, b, "sparse")
-println("computing dense")
-x_dense, lambda_dense = EqualityQPSolver(Matrix(H_sparse), g, Matrix(A_sparse), b, "dense")
+    KKT, rhs = construct_KKT(H_sparse, g, A_sparse, b)
+    println("eigvals = ", eigvals(Symmetric(Matrix(KKT))))
+    println("KKT matrix")
+    println(KKT)
 
-println("comparing sparse and dense")
-display(x_sparse)
-display(x_dense)
-println("")
-display(lambda_sparse)
-display(lambda_dense)
+    println("computing sparse")
+    x_sparse, lambda_sparse = EqualityQPSolver(H_sparse, g, A_sparse, b, "sparse")
+    println("computing dense")
+    x_dense, lambda_dense = EqualityQPSolver(Matrix(H_sparse), g, Matrix(A_sparse), b, "dense")
 
-# H = [4.0 1.0 0.0;
-#      1.0 2.0 0.0;
-#      0.0 0.0 2.0]
-# g = [8.0, 3.0, 3.0]
-# A = [1.0, 1.0, 1.0]
-# b = [1.0]
+    println("comparing sparse and dense")
+    display(x_sparse)
+    display(x_dense)
+    println("")
+    display(lambda_sparse)
+    display(lambda_dense)
 
-# x_sparse, lambda_sparse = EqualityQPSolver(sparse(H), g, sparse(A), b, "sparse")
-# print(x_sparse)
-# print(lambda_sparse)
+    # H = [4.0 1.0 0.0;
+    #      1.0 2.0 0.0;
+    #      0.0 0.0 2.0]
+    # g = [8.0, 3.0, 3.0]
+    # A = [1.0, 1.0, 1.0]
+    # b = [1.0]
 
-# 5. 
+    # x_sparse, lambda_sparse = EqualityQPSolver(sparse(H), g, sparse(A), b, "sparse")
+    # print(x_sparse)
+    # print(lambda_sparse)
+
+    # 5. 
+end

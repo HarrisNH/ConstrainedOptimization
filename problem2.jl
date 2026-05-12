@@ -7,6 +7,7 @@ using Plots
 include("helpers.jl")
 include("problem2_presolve.jl")
 include("revised_simplex.jl")
+include("problem1.jl")
 # c. 
 """
 We consider the *convex* QP in the form 
@@ -138,23 +139,6 @@ function plot_qp(H, g, A, b_l, b_u, x_l, x_u; x_star=nothing)
     return current()
 end
 
-# d. 
-function library_solver(H, g, A, b_l, b_u, x_l, x_u)
-    """
-    This solves the problem above using Ipopt. 
-    """
-    n = size(A)[1]
-    model = Model(Ipopt.Optimizer)
-    set_silent(model) 
-    @variable(model, x[1:n])
-    @constraint(model, b_l .<= A' * x .<= b_u)
-    @constraint(model, x_l .<= x .<= x_u)
-    @objective(model, Min, 1/2 * x' * H * x + g' * x)
-
-    t = @elapsed optimize!(model)
-    return value.(x), t
-end
-
 # e and f 
 """ 
 We will implement a primal active-set algorithm. 
@@ -169,23 +153,13 @@ function convex_active_set_solver(A, b, G, g, x0)
     
     # find feasible point (initial point)
 
-    tol = 1e-7
-    err = 1 #?
+    tol = 1e-8
     k = 1
     max_number_of_iterations = 10_000
     
     n_vars, m_const = size(A)
     x_list = [x0]
 
-    # find initial working set
-    # display(A)
-    # display(x0)
-    # display(b)
-    # display(A' * x0 .== b)
-    # println("n_vars, m_const = $n_vars, $m_const")
-    # active_tolerance = tol 
-    # W_set = Array(1:m_const)[A' * x0 - b .< active_tolerance] #index of working set
-    # W_not_set = Array(1:m_const)[A' * x0 - b .> active_tolerance]
     W_set = Array(1:m_const)[A' * x0 .== b] #index of working set
     W_not_set = Array(1:m_const)[A' * x0 .!= b]
 
@@ -207,9 +181,9 @@ function convex_active_set_solver(A, b, G, g, x0)
             G * x_k + g; 
             zeros(n_W) 
         ] 
-
+        #res = LDL_solver(KKT_matrix, KKT_rhs)
         res = KKT_matrix \ KKT_rhs
-
+        #print(norm(res1-res,Inf))
         p = res[1:n_vars]
         mu = res[n_vars+1:end]
         #display(mu)
@@ -262,7 +236,7 @@ function convex_active_set_solver(A, b, G, g, x0)
         converged = norm(rL, Inf) < tol && norm(rx, Inf) < tol && norm(mu, Inf) < tol 
     end
     
-    return x_list[end], k#, mu_sol 
+    return x_list[end], k, converged#, mu_sol 
 end
 
 function solve_convex_problem(H, g, A, b_l, b_u, x_l, x_u, n_dim)
@@ -288,8 +262,8 @@ function solve_convex_problem(H, g, A, b_l, b_u, x_l, x_u, n_dim)
     A_hat = [A -A I_matrix -I_matrix]
     b_hat = [b_l; -b_u; x_l; -x_u]
     # x_sol, k = convex_active_set_solver(A_hat, b_hat, H, g, x0)
-    x_sol, k = convex_active_set_solver(A_hat, b_hat, H, g, x0_true)
-    return x_sol, k
+    x_sol, k, converged = convex_active_set_solver(A_hat, b_hat, H, g, x0_true)
+    return x_sol, k, converged
 end
 
 function convex_dual_interior_point_solver(H, g, C, d, s, z)
@@ -492,21 +466,18 @@ function solve_with_commercial(H, g, A, b_l, b_u, x_l, x_u)
     
     # General linear constraints: b_l ≤ A'x ≤ b_u
     @constraint(model, b_l .<= A' * x .<= b_u)
-
-
-    # Solve
-    t = @elapsed optimize!(model)
     
+    optimize!(model)
     # Extract solution
     return (
-        x = value.(x), t = t,
+        x = value.(x),
         status = termination_status(model),
         obj = objective_value(model),
         solve_time = solve_time(model)
     )
 end
 ## SETUP PROBLEM
-n_dim = 100 # x vars
+n_dim = 20 # x vars
 n_con = 10 # n constraints 
 
 H, g, A, b_l, b_u, x_l, x_u = generate_test_problem(n_dim, n_con) # TODO: remove x0 feasible 
@@ -518,21 +489,11 @@ t_lib = result_commercial.solve_time
 
 println("Starting our primal active set solver")
 timed_result = @timed solve_convex_problem(H, g, A, b_l, b_u, x_l, x_u, n_dim)
-x_sol, k = timed_result.value
+x_sol, k, converged_active = timed_result.value
 t_our = timed_result.time
-# println("x_sol:", x_sol)
-# println("x_sol = $x_sol")
-println("iterations by our solver: $k")
-println("diff between our solver and library solver")
-display(norm(x_sol - result_commercial.x, Inf))
-println("Time used by our solver: $(t_our), Time used by lib solver: $(t_lib)")
-
-# g and h 
-print("\n\n\n\n")
-println("h)")
 
 
-# ===== Comparison =====
+
 
 # Our implementation
 println("Starting our primal dual interior point solver")
@@ -545,6 +506,14 @@ t_our = timed_result.time
 println("="^60)
 println("SOLUTION COMPARISON")
 println("="^60)
+println("\nCustom Primal Active-Set:")
+println("  Status: Converged = $(converged_active)")
+println("  Iterations: ", k)
+println("  Objective = ", round(0.5 * dot(x_sol, H * x_sol) + dot(g, x_sol), digits=8))
+println("  ||x - x_commercial|| = ", round(norm(x_sol - result_commercial.x, Inf), sigdigits=3))
+println("  Time spent = $(t_our)")
+
+
 println("\nCustom Primal-Dual Interior-Point:")
 println("  Status: ", result_custom.status)
 println("  Iterations: ", result_custom.iter)
