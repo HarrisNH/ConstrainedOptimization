@@ -3,6 +3,7 @@ using JuMP
 using Ipopt
 using Random, Distributions
 using Plots
+using Measures
 
 include("helpers.jl")
 include("problem2_presolve.jl")
@@ -153,7 +154,7 @@ function convex_active_set_solver(A, b, G, g, x0)
     
     # find feasible point (initial point)
 
-    tol = 1e-8
+    tol = 1e-6
     k = 1
     max_number_of_iterations = 10_000
     
@@ -293,8 +294,8 @@ function primal_dual_qp_ineq(
     x0=nothing,
     z0=nothing,
     s0=nothing,
-    tol=1e-8,
-    maxiter=500,
+    tol=1e-6,
+    maxiter=5000,
     η=0.995
 )
     n = size(H, 1)
@@ -310,14 +311,18 @@ function primal_dual_qp_ineq(
     s .= max.(s, 1.0)
     
     e = ones(mc)
-    
+
     history = Dict(
         :μ => Float64[],
         :dual_res => Float64[],
         :primal_res => Float64[],
         :obj => Float64[]
     )
-    
+
+    dual_res   = Inf
+    primal_res = Inf
+    μ          = Inf
+
     for k in 1:maxiter
         # Compute residuals
         rL  = H * x + g - C * z  
@@ -410,6 +415,9 @@ function primal_dual_qp_ineq(
         s .= max.(s, 1e-8)
     end
     
+    println("  Interior point: maxiter=$maxiter reached. " *
+            "tol achieved: dual=$(round(dual_res,sigdigits=3)), " *
+            "primal=$(round(primal_res,sigdigits=3)), μ=$(round(μ,sigdigits=3))")
     return (
         x = x,
         z = z,
@@ -472,8 +480,7 @@ function solve_with_commercial(H, g, A, b_l, b_u, x_l, x_u)
     n = size(H, 1)
     
     # Create model
-    model = Model(Ipopt.Optimizer)
-    set_silent(model)  # Suppress output
+    model = Model(optimizer_with_attributes(Ipopt.Optimizer, "tol" => 1e-6, "print_level" => 0))
     
     # Variables
     @variable(model, x_l[i] <= x[i=1:n] <= x_u[i])
@@ -605,28 +612,32 @@ function create_benchmark_plots(res_vars, n_range, m_fixed,
     p1 = plot(n_range, res_vars.times_lib,
               label="Library (Ipopt)", lw=2, marker=:circle,
               xlabel="Number of variables (n)", ylabel="CPU time [s]",
-              title="CPU time vs. variables\n(m = $m_fixed fixed)", yscale=:log10)
+              title="CPU time vs. variables\n(m = $m_fixed fixed)", yscale=:log10,
+              left_margin=8mm)
     plot!(p1, n_range, res_vars.times_act, label="Active-set",     lw=2, marker=:square)
     plot!(p1, n_range, res_vars.times_ip,  label="Interior point", lw=2, marker=:diamond)
 
     p2 = plot(n_range, iters_as_float(res_vars.iters_lib),
               label="Library (Ipopt)", lw=2, marker=:circle,
               xlabel="Number of variables (n)", ylabel="Iterations",
-              title="Iterations vs. variables\n(m = $m_fixed fixed)")
+              title="Iterations vs. variables\n(m = $m_fixed fixed)",
+              yscale=:log10, left_margin=8mm)
     plot!(p2, n_range, iters_as_float(res_vars.iters_act), label="Active-set",     lw=2, marker=:square)
     plot!(p2, n_range, iters_as_float(res_vars.iters_ip),  label="Interior point", lw=2, marker=:diamond)
 
     p3 = plot(m_range, res_cons.times_lib,
               label="Library (Ipopt)", lw=2, marker=:circle,
               xlabel="Number of constraints (m)", ylabel="CPU time [s]",
-              title="CPU time vs. constraints\n(n = $n_fixed fixed)", yscale=:log10)
+              title="CPU time vs. constraints\n(n = $n_fixed fixed)", yscale=:log10,
+              left_margin=8mm)
     plot!(p3, m_range, res_cons.times_act, label="Active-set",     lw=2, marker=:square)
     plot!(p3, m_range, res_cons.times_ip,  label="Interior point", lw=2, marker=:diamond)
 
     p4 = plot(m_range, iters_as_float(res_cons.iters_lib),
               label="Library (Ipopt)", lw=2, marker=:circle,
               xlabel="Number of constraints (m)", ylabel="Iterations",
-              title="Iterations vs. constraints\n(n = $n_fixed fixed)")
+              title="Iterations vs. constraints\n(n = $n_fixed fixed)",
+              yscale=:log10, left_margin=8mm)
     plot!(p4, m_range, iters_as_float(res_cons.iters_act), label="Active-set",     lw=2, marker=:square)
     plot!(p4, m_range, iters_as_float(res_cons.iters_ip),  label="Interior point", lw=2, marker=:diamond)
 
