@@ -52,7 +52,7 @@ function generate_test_problem(n, m_a)
     x[active_idx] .= x_u[active_idx]
 
     A = rand(Uniform(-2, 2), n, m_a)
-    println("rank(A) = $(rank(A))")
+    # println("rank(A) = $(rank(A))")
     y = A' * x
     diff_Ax = rand(Uniform(0, 5), m_a)
     # print(size(diff_Ax))
@@ -477,97 +477,158 @@ function solve_with_commercial(H, g, A, b_l, b_u, x_l, x_u)
         iter = MOI.get(model, MOI.BarrierIterations())
     )
 end
-## SETUP PROBLEM
-n_dim = 100 # x vars
-n_con = 100 # n constraints 
+## BENCHMARKING
 
-H, g, A, b_l, b_u, x_l, x_u = generate_test_problem(n_dim, n_con) # TODO: remove x0 feasible 
+function benchmark_vs_nvars(n_range, m_fixed)
+    times_lib = Float64[]
+    times_act = Float64[]
+    times_ip  = Float64[]
+    iters_lib = Int[]
+    iters_act = Int[]   # -1 marks non-convergence or failure
+    iters_ip  = Int[]
 
+    for n in n_range
+        println("  Vars sweep: n=$n, m=$m_fixed")
+        H, g, A, b_l, b_u, x_l, x_u = generate_test_problem(n, m_fixed)
 
-println("Starting library solver")
-result_commercial = solve_with_commercial(H, g, A, b_l, b_u, x_l, x_u)
-t_lib = result_commercial.solve_time
+        # Library (Ipopt)
+        try
+            t = @timed solve_with_commercial(H, g, A, b_l, b_u, x_l, x_u)
+            push!(times_lib, t.time)
+            push!(iters_lib, t.value.iter)
+        catch e
+            println("  Library failed: $e")
+            push!(times_lib, NaN); push!(iters_lib, -1)
+        end
 
-# println("Starting our primal active set solver")
-# timed_result = @timed solve_convex_problem(H, g, A, b_l, b_u, x_l, x_u, n_dim)
-# x_sol, k, converged_active = timed_result.value
-# t_act = timed_result.time
+        # Active-set
+        try
+            t = @timed solve_convex_problem(H, g, A, b_l, b_u, x_l, x_u, n)
+            push!(times_act, t.time)
+            _, k, conv = t.value
+            push!(iters_act, conv ? k : -1)
+        catch e
+            println("  Active-set failed: $e")
+            push!(times_act, NaN); push!(iters_act, -1)
+        end
 
+        # Interior point (include setup in timing for fairness)
+        try
+            t = @timed begin
+                C, d = setup_qp_with_bounds(H, g, A, b_l, b_u, x_l, x_u)
+                primal_dual_qp_ineq(H, g, C, d)
+            end
+            push!(times_ip, t.time)
+            push!(iters_ip, t.value.iter)
+        catch e
+            println("  Interior point failed: $e")
+            push!(times_ip, NaN); push!(iters_ip, -1)
+        end
+    end
 
+    return (times_lib=times_lib, iters_lib=iters_lib,
+            times_act=times_act, iters_act=iters_act,
+            times_ip=times_ip,   iters_ip=iters_ip)
+end
 
+function benchmark_vs_ncons(m_range, n_fixed)
+    times_lib = Float64[]
+    times_act = Float64[]
+    times_ip  = Float64[]
+    iters_lib = Int[]
+    iters_act = Int[]
+    iters_ip  = Int[]
 
-# # Our implementation
-# println("Starting our primal dual interior point solver")
-# C, d = setup_qp_with_bounds(H, g, A, b_l, b_u, x_l, x_u)
-# timed_result  = @timed primal_dual_qp_ineq(H, g, C, d)
-# result_custom = timed_result.value
-# t_int = timed_result.time
+    for m in m_range
+        println("  Cons sweep: n=$n_fixed, m=$m")
+        H, g, A, b_l, b_u, x_l, x_u = generate_test_problem(n_fixed, m)
 
-# Compare
-println("="^60)
-println("SOLUTION COMPARISON")
-println("="^60)
-println("\nCustom Primal Active-Set:")
-println("  Status: Converged = $(converged_active)")
-println("  Iterations: ", k)
-println("  Objective = ", round(0.5 * dot(x_sol, H * x_sol) + dot(g, x_sol), digits=8))
-println("  ||x - x_commercial|| = ", round(norm(x_sol - result_commercial.x, Inf), sigdigits=3))
-println("  Time spent = $(t_act)")
+        try
+            t = @timed solve_with_commercial(H, g, A, b_l, b_u, x_l, x_u)
+            push!(times_lib, t.time)
+            push!(iters_lib, t.value.iter)
+        catch e
+            println("  Library failed: $e")
+            push!(times_lib, NaN); push!(iters_lib, -1)
+        end
 
+        try
+            t = @timed solve_convex_problem(H, g, A, b_l, b_u, x_l, x_u, n_fixed)
+            push!(times_act, t.time)
+            _, k, conv = t.value
+            push!(iters_act, conv ? k : -1)
+        catch e
+            println("  Active-set failed: $e")
+            push!(times_act, NaN); push!(iters_act, -1)
+        end
 
-println("\nCustom Primal-Dual Interior-Point:")
-println("  Status: ", result_custom.status)
-println("  Iterations: ", result_custom.iter)
-println("  Objective = ", round(0.5 * dot(result_custom.x, H * result_custom.x) + dot(g, result_custom.x), digits=8))
-println("  Final μ = ", round(result_custom.history[:μ][end], sigdigits=3))
-println(" Time spent = $(t_int)")
+        try
+            t = @timed begin
+                C, d = setup_qp_with_bounds(H, g, A, b_l, b_u, x_l, x_u)
+                primal_dual_qp_ineq(H, g, C, d)
+            end
+            push!(times_ip, t.time)
+            push!(iters_ip, t.value.iter)
+        catch e
+            println("  Interior point failed: $e")
+            push!(times_ip, NaN); push!(iters_ip, -1)
+        end
+    end
 
-println("\nCommercial Solver (Ipopt):")
-println("  Status: ", result_commercial.status)
-println("  Iterations: ", result_commercial.iter)
-println("  Objective = ", round(result_commercial.obj, digits=8))
-println("  Solve time = ", round(result_commercial.solve_time, digits=4), " seconds")
+    return (times_lib=times_lib, iters_lib=iters_lib,
+            times_act=times_act, iters_act=iters_act,
+            times_ip=times_ip,   iters_ip=iters_ip)
+end
 
-println("\nDifference:")
-println("  ||x_custom - x_commercial|| = ", norm(result_custom.x - result_commercial.x))
-println("  Objective difference = ", abs(
-    0.5 * dot(result_custom.x, H * result_custom.x) + dot(g, result_custom.x) - 
-    result_commercial.obj
-))
+# Convert -1 (non-convergence marker) to NaN for plotting
+iters_as_float(v::Vector{Int}) = [i == -1 ? NaN : Float64(i) for i in v]
 
+function create_benchmark_plots(res_vars, n_range, m_fixed,
+                                 res_cons, m_range, n_fixed)
+    p1 = plot(n_range, res_vars.times_lib,
+              label="Library (Ipopt)", lw=2, marker=:circle,
+              xlabel="Number of variables (n)", ylabel="CPU time [s]",
+              title="CPU time vs. variables\n(m = $m_fixed fixed)", yscale=:log10)
+    plot!(p1, n_range, res_vars.times_act, label="Active-set",     lw=2, marker=:square)
+    plot!(p1, n_range, res_vars.times_ip,  label="Interior point", lw=2, marker=:diamond)
 
+    p2 = plot(n_range, iters_as_float(res_vars.iters_lib),
+              label="Library (Ipopt)", lw=2, marker=:circle,
+              xlabel="Number of variables (n)", ylabel="Iterations",
+              title="Iterations vs. variables\n(m = $m_fixed fixed)")
+    plot!(p2, n_range, iters_as_float(res_vars.iters_act), label="Active-set",     lw=2, marker=:square)
+    plot!(p2, n_range, iters_as_float(res_vars.iters_ip),  label="Interior point", lw=2, marker=:diamond)
 
-p1 = plot(result_custom.history[:μ], 
-          yscale=:log10, 
-          xlabel="Iteration", 
-          ylabel="Duality Gap μ",
-          label="μ",
-          lw=2,
-          marker=:circle,
-          title="Convergence History")
+    p3 = plot(m_range, res_cons.times_lib,
+              label="Library (Ipopt)", lw=2, marker=:circle,
+              xlabel="Number of constraints (m)", ylabel="CPU time [s]",
+              title="CPU time vs. constraints\n(n = $n_fixed fixed)", yscale=:log10)
+    plot!(p3, m_range, res_cons.times_act, label="Active-set",     lw=2, marker=:square)
+    plot!(p3, m_range, res_cons.times_ip,  label="Interior point", lw=2, marker=:diamond)
 
-p2 = plot(result_custom.history[:dual_res], 
-          yscale=:log10,
-          xlabel="Iteration", 
-          ylabel="Residual",
-          label="Dual residual",
-          lw=2,
-          marker=:circle)
-plot!(p2, result_custom.history[:primal_res], 
-      label="Primal residual",
-      lw=2,
-      marker=:square)
+    p4 = plot(m_range, iters_as_float(res_cons.iters_lib),
+              label="Library (Ipopt)", lw=2, marker=:circle,
+              xlabel="Number of constraints (m)", ylabel="Iterations",
+              title="Iterations vs. constraints\n(n = $n_fixed fixed)")
+    plot!(p4, m_range, iters_as_float(res_cons.iters_act), label="Active-set",     lw=2, marker=:square)
+    plot!(p4, m_range, iters_as_float(res_cons.iters_ip),  label="Interior point", lw=2, marker=:diamond)
 
-p3 = plot(result_custom.history[:obj],
-          xlabel="Iteration",
-          ylabel="Objective Value",
-          label="Objective",
-          lw=2,
-          marker=:circle)
-hline!(p3, [result_commercial.obj], 
-       label="Commercial solver",
-       linestyle=:dash,
-       lw=2)
+    fig = plot(p1, p2, p3, p4, layout=(2, 2), size=(1200, 900), legend=:topleft)
+    savefig(fig, "problem2_benchmark.png")
+    println("Saved benchmark plots to problem2_benchmark.png")
+    return fig
+end
 
-plot(p1, p2, p3, layout=(1,3), size=(1200,400))
-savefig("problem2-h.png")
+## Run benchmarks
+n_range = collect(20:20:300)   # vary variables; m_fixed < min(n_range) = 5
+m_fixed = 100
+n_fixed = 300
+m_range = collect(10:10:100)   # vary constraints; all m < n_fixed = 20
+
+println("=== Sweeping number of variables (m=$m_fixed fixed) ===")
+res_vars = benchmark_vs_nvars(n_range, m_fixed)
+
+println("=== Sweeping number of constraints (n=$n_fixed fixed) ===")
+res_cons = benchmark_vs_ncons(m_range, n_fixed)
+
+create_benchmark_plots(res_vars, n_range, m_fixed, res_cons, m_range, n_fixed)

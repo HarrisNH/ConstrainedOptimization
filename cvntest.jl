@@ -360,7 +360,7 @@ b_hat = [b_l; -b_u; x_l; -x_u]
 
 using Plots
 
-# After running your solver:
+# After running our solver:
 
 x_sol, iters, rL_hist, rx_hist, mu_hist, obj_hist, W_hist = convex_active_set_solver(A_hat, b_hat, H, g, x0)
 println(x_sol)

@@ -132,66 +132,67 @@ if abspath(PROGRAM_FILE) == @__FILE__
     display(lambda_sparse)
     display(lambda_dense)
 
-function timing_study(sizes, betas; alpha=0.5, density=0.15, n_runs=3)
-    results = Dict{Float64, Tuple{Vector{Float64}, Vector{Float64}}}()
+    function timing_study(sizes, betas; alpha=0.5, density=0.15, n_runs=3)
+        results = Dict{Float64, Tuple{Vector{Float64}, Vector{Float64}}}()
 
-    for β in betas
-        t_dense  = zeros(length(sizes))
-        t_sparse = zeros(length(sizes))
+        for β in betas
+            t_dense  = zeros(length(sizes))
+            t_sparse = zeros(length(sizes))
 
-        for (i, n) in enumerate(sizes)
-            for _ in 1:n_runs
-                H, g_n, A, b_n = RandomEQP(n, alpha, density, β, "dense")
+            for (i, n) in enumerate(sizes)
+                for _ in 1:n_runs
+                    H, g_n, A, b_n = RandomEQP(n, alpha, density, β, "dense")
 
-                t_dense[i]  += @elapsed EqualityQPSolverLDLdense(H,         g_n, A,         b_n)
-                t_sparse[i] += @elapsed EqualityQPSolverLDLsparse(sparse(H), g_n, sparse(A), b_n)
+                    t_dense[i]  += @elapsed EqualityQPSolverLDLdense(H,         g_n, A,         b_n)
+                    t_sparse[i] += @elapsed EqualityQPSolverLDLsparse(sparse(H), g_n, sparse(A), b_n)
+                end
+                t_dense[i]  /= n_runs
+                t_sparse[i] /= n_runs
+
+                println("  β=$β  n=$n  dense=$(round(t_dense[i]*1000, digits=2))ms  " *
+                        "sparse=$(round(t_sparse[i]*1000, digits=2))ms")
             end
-            t_dense[i]  /= n_runs
-            t_sparse[i] /= n_runs
 
-            println("  β=$β  n=$n  dense=$(round(t_dense[i]*1000, digits=2))ms  " *
-                    "sparse=$(round(t_sparse[i]*1000, digits=2))ms")
+            results[β] = (t_dense, t_sparse)
         end
 
-        results[β] = (t_dense, t_sparse)
+        return results
     end
 
-    return results
+
+    sizes = [50, 100, 200, 300, 400, 500]
+    betas = [0.25, 0.50, 0.75]
+
+    println("Running timing study...")
+    results = timing_study(sizes, betas)
+
+    plots = []
+    for β in betas
+        t_dense, t_sparse = results[β]
+        m_sizes = Int.(round.(β .* sizes))
+
+        p = plot(sizes, [t_dense t_sparse],
+                label      = ["Dense" "Sparse"],
+                xlabel     = "n",
+                ylabel     = "CPU time (s)",
+                title      = "β = $β  (m = βn constraints)",
+                marker     = :circle,
+                linewidth  = 2,
+                legend     = :topleft,
+                yscale     = :log10)
+
+        # annotate m values on x-axis for context
+        annotate!(p, sizes[end], t_dense[end],
+                text("m=$(m_sizes[end])", 8, :right))
+        push!(plots, p)
+    end
+
+    fig = plot(plots...,
+        layout = (1, 3),
+        size   = (1100, 380),
+        plot_title = "CPU time vs problem size n  (density=15%)",
+        plot_titlefontsize = 12,
+        titlefont=font(10,"Computer Modern")
+    )
+    savefig(fig, "timing_exercise5.png")
 end
-
-
-sizes = [50, 100, 200, 300, 400, 500]
-betas = [0.25, 0.50, 0.75]
-
-println("Running timing study...")
-results = timing_study(sizes, betas)
-
-plots = []
-for β in betas
-    t_dense, t_sparse = results[β]
-    m_sizes = Int.(round.(β .* sizes))
-
-    p = plot(sizes, [t_dense t_sparse],
-             label      = ["Dense" "Sparse"],
-             xlabel     = "n",
-             ylabel     = "CPU time (s)",
-             title      = "β = $β  (m = βn constraints)",
-             marker     = :circle,
-             linewidth  = 2,
-             legend     = :topleft,
-             yscale     = :log10)
-
-    # annotate m values on x-axis for context
-    annotate!(p, sizes[end], t_dense[end],
-              text("m=$(m_sizes[end])", 8, :right))
-    push!(plots, p)
-end
-
-fig = plot(plots...,
-    layout = (1, 3),
-    size   = (1100, 380),
-    plot_title = "CPU time vs problem size n  (density=15%)",
-    plot_titlefontsize = 12,
-    titlefont=font(10,"Computer Modern")
-)
-savefig(fig, "timing_exercise5.png")
