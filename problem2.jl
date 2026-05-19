@@ -352,7 +352,24 @@ function primal_dual_qp_ineq(
         Hbar = H + C * S_inv_Z * C'
 
         # Cholesky
-        F = cholesky(Symmetric(Hbar))
+        #F = cholesky(Symmetric(Hbar))
+
+
+        F = let
+            δ = 0.0
+            local fac
+            success = false
+            while !success
+                try
+                    fac = cholesky(Symmetric(Hbar + δ * I))
+                    success = true
+                catch
+                    δ = (δ == 0.0) ? 1e-8 : δ * 10
+                    δ > 1e-2 && error("Cholesky failed even with δ=$δ regularization")
+                end
+            end
+            fac
+        end
         
         # Solve for affine direction
         r_hat_L = rL - C * S_inv_Z * (rC - rsz ./ z)
@@ -389,8 +406,8 @@ function primal_dual_qp_ineq(
         z .+= α * dz
         s .+= α * ds
         
-        z .= max.(z, 1e-14)
-        s .= max.(s, 1e-14)
+        z .= max.(z, 1e-8)
+        s .= max.(s, 1e-8)
     end
     
     return (
