@@ -37,7 +37,7 @@ function library_solver_lp(g, A, b_l, b_u, x_l, x_u)
     #TODO transform to LP solver
     """
     n = size(A)[1]
-    model = Model(Ipopt.Optimizer)
+    model = Model(optimizer_with_attributes(Ipopt.Optimizer, "tol" => 1e-6, "print_level" => 0))
     @variable(model, x[1:n])
     @constraint(model, b_l .<= A' * x .<= b_u)
     @constraint(model, x_l .<= x .<= x_u)
