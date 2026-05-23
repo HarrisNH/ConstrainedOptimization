@@ -3,7 +3,6 @@ using JuMP
 using Ipopt
 using Random, Distributions
 using Plots
-
 using Measures
 
 include("test_problems.jl")
@@ -13,19 +12,16 @@ include("helpers.jl")
 function factorize_H(H)
     try
         F = cholesky(Symmetric(H + 1e-8 * I))
-        #println("Using Cholesky")
         return F
     catch end
 
     try
         F = bunchkaufman(Symmetric(H))
-        #println("Using Bunchkaufman")
         return F
     catch end
 
     try
         F = lu(H)
-        #println("Using LU")
         return F
     catch end
 
@@ -44,21 +40,24 @@ function library_solver_lp(g, A, b_l, b_u, x_l, x_u)
     return (x=value.(x), iter=MOI.get(model, MOI.BarrierIterations()))
 end
 
-# e and f 
+#IP algorithm for LP problem
 function primal_dual_interior_LP(g, A, b, x0, n_orig, x_l)
     m, n = size(A)
     maxiter = 10000
     tol = 1.0e-3
 
+    
     lambda = ones(n, 1)
     mu = zeros(m, 1)
     x = x0
 
+    #residuals
     rL = g - A' * mu - lambda 
     rA = A * x0 - b 
     rC = x0 .* lambda
     s = sum(rC) / n
 
+    #convergence test
     converged = (norm(rL, Inf) < tol) && (norm(rA, Inf) < tol) && (norm(s, Inf) < tol)
     k = 0
     history = [x0[1:n_orig] .+ x_l]  # store original-space iterates
@@ -132,16 +131,19 @@ function benchmark_lp_vs_nvars(n_range, m_fixed)
     iters_lib = Int[]
 
     for n in n_range
-        #println("  LP vars sweep: n=$n, m=$m_fixed")
         g, A, b_l, b_u, x_l, x_u, _ = generate_test_problem_lp(n, m_fixed)
 
-        # Standard form (shared by IP and simplex)
+        # Standard form
         A_std, b_std, g_std = to_standard_form(g, A, b_l, b_u, x_l, x_u)
         n_std = length(g_std)
+
+        #FP standard problem
         A_fp, b_fp, g_fp, x0 = fp_standard_form(A_std, b_std)
+
+        #Find fp using simplex
         result_fp = revised_simplex(A_fp, b_fp, g_fp, x0)
-        x0_sim = result_fp.x[1:n_std]          # unclamped: preserves zero non-basics for simplex
-        x0_ip  = max.(x0_sim, 1e-4)            # clamped: strict positivity required by IP
+        x0_sim = result_fp.x[1:n_std]          # feasible point
+        x0_ip  = max.(x0_sim, 1e-4)            # ensure strict positivity required by IP
 
         # Interior point
         try
@@ -188,14 +190,19 @@ function benchmark_lp_vs_ncons(m_range, n_fixed)
     iters_lib = Int[]
 
     for m in m_range
+        #lp test problem
         g, A, b_l, b_u, x_l, x_u, _ = generate_test_problem_lp(n_fixed, m)
 
+        # to standard form
         A_std, b_std, g_std = to_standard_form(g, A, b_l, b_u, x_l, x_u)
         n_std = length(g_std)
+        # fp standard form
         A_fp, b_fp, g_fp, x0 = fp_standard_form(A_std, b_std)
+        # find fp
         result_fp = revised_simplex(A_fp, b_fp, g_fp, x0)
-        x0_sim = result_fp.x[1:n_std]
-        x0_ip  = max.(x0_sim, 1e-4)
+
+        x0_sim = result_fp.x[1:n_std] #feasible point
+        x0_ip  = max.(x0_sim, 1e-4)  # ensure strict positivity required by IP
 
         try
             t = @timed primal_dual_interior_LP(g_std, A_std, b_std, x0_ip, n_fixed, x_l)
@@ -269,19 +276,6 @@ function create_lp_benchmark_plots(res_vars, n_range, m_fixed,
     return fig
 end
 
-# Run
-n_range_lp = collect(10:30:200)
-m_fixed_lp = 100
-n_fixed_lp = 100
-m_range_lp = collect(10:30:200)
-
-println("=== LP: sweeping variables (m=$m_fixed_lp) ===")
-# res_vars_lp = benchmark_lp_vs_nvars(n_range_lp, m_fixed_lp)
-
-println("=== LP: sweeping constraints (n=$n_fixed_lp) ===")
-# res_cons_lp = benchmark_lp_vs_ncons(m_range_lp, n_fixed_lp)
-
-# create_lp_benchmark_plots(res_vars_lp, n_range_lp, m_fixed_lp, res_cons_lp, m_range_lp, n_fixed_lp)
 function plot_lp_solution_walks(g, A, b_l, b_u, x_l, x_u, n_dim)
     @assert n_dim == 2 "Solution walk plot only supported for 2D problems"
 
@@ -292,10 +286,10 @@ function plot_lp_solution_walks(g, A, b_l, b_u, x_l, x_u, n_dim)
     x0_std = result_fp.x[1:n_std]
     x0_ip = ones(n_std)
     x_ip, _, _, ip_history, _ = primal_dual_interior_LP(g_std, A_std, b_std, x0_ip, n_dim, x_l)
-    x_ip_orig = x_ip[1:n_dim] .+ x_l
+    x_ip_orig = x_ip[1:n_dim] .+ x_l # recover non-shifted x
 
     result_sim = revised_simplex(A_std, b_std, g_std, x0_std)
-    x_sim_orig = result_sim.x[1:n_dim] .+ x_l
+    x_sim_orig = result_sim.x[1:n_dim] .+ x_l # recover non-shifted x
 
     x_lib = library_solver_lp(g, A, b_l, b_u, x_l, x_u).x
 
@@ -370,61 +364,23 @@ function plot_lp_solution_walks(g, A, b_l, b_u, x_l, x_u, n_dim)
     return plt
 end
 
+# Run
+n_range_lp = collect(10:30:200)
+m_fixed_lp = 100
+n_fixed_lp = 100
+m_range_lp = collect(10:30:200)
+
+println("=== LP: sweeping variables (m=$m_fixed_lp) ===")
+res_vars_lp = benchmark_lp_vs_nvars(n_range_lp, m_fixed_lp)
+
+println("=== LP: sweeping constraints (n=$n_fixed_lp) ===")
+res_cons_lp = benchmark_lp_vs_ncons(m_range_lp, n_fixed_lp)
+
+create_lp_benchmark_plots(res_vars_lp, n_range_lp, m_fixed_lp, res_cons_lp, m_range_lp, n_fixed_lp)
+
 # --- Run 2D test ---
 println("\n=== 2D solution walk test ===")
 n_dim_2d = 2
 n_con_2d = 4
 g2, A2, b_l2, b_u2, x_l2, x_u2, _ = generate_test_problem_lp(n_dim_2d, n_con_2d)
 plot_lp_solution_walks(g2, A2, b_l2, b_u2, x_l2, x_u2, n_dim_2d)
-# println("Trying to solve problems with simplex")
-# n_dim = 3
-# n_con = 22
-# println("Generate test prob with $(n_dim) x vars and $(n_con) constraints")
-# g, A, b_l, b_u, x_l, x_u, x0 = generate_test_problem_lp(n_dim, n_con)
-# I_matrix = Matrix{Float64}(I, n_dim, n_dim)
-
-
-# #now rewrite to LP standard form:
-# println("Rewriting to standard form")
-# A_std, b_std, g_std = to_standard_form(g, A, b_l, b_u, x_l, x_u)
-# #number of vars
-# n_std = length(g_std)
-
-
-
-# #LP problem to find feasible point
-# println("Formulate sub-LP to find feasible point")
-# A_fp, b_fp, g_fp, x0 = fp_standard_form(A_std, b_std)
-# result_fp = revised_simplex(A_fp, b_fp, g_fp, x0)
-# x0_std = result_fp.x[1:n_std]#actual feasible point  
-# x0_std = max.(x0_std, 1e-4)
-# if !result_fp.optimal
-#     print(result_fp)
-#     error("Phase 1 failed - problem may be infeasible")
-# end
-# x, mu, lambda = primal_dual_interior_LP(g_std, A_std, b_std, x0_std)
-# println("test of primal_dual_LP")
-# println("Interior point solution: $(x[1:n_dim] .+ x_l)")
-# # display("x = $x")
-# # display("mu = $mu")
-# # display("lambda = $lambda")
-
-# println("Feasible point found. Proceeding to solving orig. LP problem")
-
-# result = revised_simplex(A_std, b_std, g_std, x0_std)
-# if result.optimal
-#     println("Optimal solution: $(result.x[1:n_dim] .+ x_l)")
-# end
-
-# lib_sol_lp = library_solver_lp(g, A, b_l, b_u, x_l, x_u)
-# # print(lib_sol_lp)
-
-# # Extract and compare solutions
-# x_ip = x[1:n_dim] .+ x_l
-# x_simplex = result.optimal ? result.x[1:n_dim] .+ x_l : fill(NaN, n_dim)
-# x_ipopt = lib_sol_lp
-
-# println("\n=== Solution Comparison ===")
-# println("Interior Point:  $x_ip")
-# println("Simplex:         $x_simplex")
-# println("Ipopt:           $x_ipopt")
