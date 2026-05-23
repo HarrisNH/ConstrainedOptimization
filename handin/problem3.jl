@@ -25,7 +25,7 @@ function factorize_H(H)
         return F
     catch end
 
-    error("Cholesky, Bunch-Kaufman and LU all failed — matrix is singular")
+    error("Cholesky, Bunch-Kaufman, and LU all failed — matrix is singular")
 end
 
 # d 
@@ -44,7 +44,7 @@ end
 function primal_dual_interior_LP(g, A, b, x0, n_orig, x_l)
     m, n = size(A)
     maxiter = 10000
-    tol = 1.0e-3
+    tol = 1.0e-6
 
     
     lambda = ones(n, 1)
@@ -364,23 +364,27 @@ function plot_lp_solution_walks(g, A, b_l, b_u, x_l, x_u, n_dim)
     return plt
 end
 
-# Run
-n_range_lp = collect(10:30:200)
-m_fixed_lp = 100
-n_fixed_lp = 100
-m_range_lp = collect(10:30:200)
 
-println("=== LP: sweeping variables (m=$m_fixed_lp) ===")
-res_vars_lp = benchmark_lp_vs_nvars(n_range_lp, m_fixed_lp)
 
-println("=== LP: sweeping constraints (n=$n_fixed_lp) ===")
-res_cons_lp = benchmark_lp_vs_ncons(m_range_lp, n_fixed_lp)
+if abspath(PROGRAM_FILE) == @__FILE__
+    # Run
+    n_range_lp = collect(10:30:200)
+    m_fixed_lp = 100
+    n_fixed_lp = 100
+    m_range_lp = collect(10:30:200)
 
-create_lp_benchmark_plots(res_vars_lp, n_range_lp, m_fixed_lp, res_cons_lp, m_range_lp, n_fixed_lp)
+    println("=== LP: sweeping variables (m=$m_fixed_lp) ===")
+    res_vars_lp = benchmark_lp_vs_nvars(n_range_lp, m_fixed_lp)
 
-# --- Run 2D test ---
-println("\n=== 2D solution walk test ===")
-n_dim_2d = 2
-n_con_2d = 4
-g2, A2, b_l2, b_u2, x_l2, x_u2, _ = generate_test_problem_lp(n_dim_2d, n_con_2d)
-plot_lp_solution_walks(g2, A2, b_l2, b_u2, x_l2, x_u2, n_dim_2d)
+    println("=== LP: sweeping constraints (n=$n_fixed_lp) ===")
+    res_cons_lp = benchmark_lp_vs_ncons(m_range_lp, n_fixed_lp)
+
+    create_lp_benchmark_plots(res_vars_lp, n_range_lp, m_fixed_lp, res_cons_lp, m_range_lp, n_fixed_lp)
+
+    # --- Run 2D test ---
+    println("\n=== 2D solution walk test ===")
+    n_dim_2d = 2
+    n_con_2d = 4
+    g2, A2, b_l2, b_u2, x_l2, x_u2, _ = generate_test_problem_lp(n_dim_2d, n_con_2d)
+    plot_lp_solution_walks(g2, A2, b_l2, b_u2, x_l2, x_u2, n_dim_2d)
+end
