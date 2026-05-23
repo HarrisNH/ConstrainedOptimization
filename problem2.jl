@@ -251,7 +251,6 @@ function solve_convex_problem(H, g, A, b_l, b_u, x_l, x_u, n_dim)
     A_fp, b_fp, g_fp, x0 = fp_standard_form(A_std, b_std)
     result_fp = revised_simplex(A_fp, b_fp, g_fp, x0)
     if !result_fp.optimal
-        print(result_fp)
         error("Phase 1 failed - problem may be infeasible")
     end
     x0_shifted = result_fp.x[1:size(H)[1]]

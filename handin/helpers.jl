@@ -53,3 +53,16 @@ function fp_standard_form(A, b)
     x0 = [zeros(n); t; t * e - b; t * e + b]
     return A_fp, b_fp, g_fp, x0
 end
+
+function LDL_solver(KKT_matrix, rhs)
+    """
+    Solver for the KKT system.
+    """
+    if issparse(KKT_matrix)
+        # this defaults to sparse LU and thus handles sparse indefinite systems
+        return KKT_matrix \ rhs
+    else
+        # Bunch-Kaufman is for dense symmetric indefinite systems
+        return bunchkaufman(Symmetric(KKT_matrix)) \ rhs
+    end
+end

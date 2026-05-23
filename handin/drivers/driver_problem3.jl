@@ -3,10 +3,8 @@ using Random
 # Setting seed for reproducibility
 Random.seed!(1234)
 
-include("../handin/test_problems.jl") 
-include("../handin/problem3.jl")
-
-
+include("../test_problems.jl") 
+include("../problem3.jl")
 
 # Generate test problem
 n_dim = 25

@@ -130,7 +130,6 @@ function solve_convex_problem(H, g, A, b_l, b_u, x_l, x_u, n_dim)
     # Run simplex on FP problem
     result_fp = revised_simplex(A_fp, b_fp, g_fp, x0)
     if !result_fp.optimal
-        print(result_fp)
         error("Phase 1 failed - problem may be infeasible")
     end
 
@@ -167,6 +166,15 @@ end
 
 
 
+function primal_dual_qp_ineq(H, g, C, d; tol=1e-6, maxiter=5000, η=0.995)
+    n = size(H, 1)
+    mc = size(C, 2)
+    x0 = zeros(n)
+    s0 = ones(mc)
+    z0 = ones(mc)
+    return primal_dual_qp_ineq(H, g, C, d, x0, z0, s0, tol, maxiter, η)
+end
+
 function primal_dual_qp_ineq(H, g, C, d, x0, z0, s0, tol=1e-6, maxiter=5000, η=0.995)
     n = size(H, 1) #number of vars
     mc = size(C, 2)  # Number of inequality constraints
@@ -182,7 +190,7 @@ function primal_dual_qp_ineq(H, g, C, d, x0, z0, s0, tol=1e-6, maxiter=5000, η=
     
     e = ones(mc)
 
-    history = Dict(:μ, :dual_res, :primal_res, :obj, :x)
+    history = Dict(:μ => Float64[], :dual_res => Float64[], :primal_res => Float64[], :obj => Float64[], :x => Vector{Float64}[])
 
     dual_res   = Inf
     primal_res = Inf
@@ -526,12 +534,9 @@ function plot_qp_walks(H, g, A, b_l, b_u, x_l, x_u)
     # Active-set walk (includes x_walk in original space)
     x_act, _, _, x_walk_act = solve_convex_problem(H, g, A, b_l, b_u, x_l, x_u, n)
 
-    # Feasible starting point for IP (reuse active-set's starting point)
-    x0_walk = x_walk_act[1]
-
     # Interior-point walk
     C, d = setup_qp_with_bounds(H, g, A, b_l, b_u, x_l, x_u)
-    result_ip = primal_dual_qp_ineq(H, g, C, d; x0=x0_walk)
+    result_ip = primal_dual_qp_ineq(H, g, C, d)
     x_walk_ip = result_ip.history[:x]
 
     # Ipopt reference
@@ -610,20 +615,22 @@ function plot_qp_walks(H, g, A, b_l, b_u, x_l, x_u)
     return plt
 end
 
-## Run benchmarks
-n_range = collect(20:20:300)   
-m_fixed = 100
-n_fixed = 300
-m_range = collect(10:10:100)  
+if abspath(PROGRAM_FILE) == @__FILE__
+    ## Run benchmarks
+    n_range = collect(20:20:300)   
+    m_fixed = 100
+    n_fixed = 300
+    m_range = collect(10:10:100)  
 
-println("Benchmarking for range of variables (m=$m_fixed fixed)")
-res_vars = benchmark_vs_nvars(n_range, m_fixed)
+    println("Benchmarking for range of variables (m=$m_fixed fixed)")
+    res_vars = benchmark_vs_nvars(n_range, m_fixed)
 
-println("Benchmarking for range of constraints (n=$n_fixed fixed)")
-res_cons = benchmark_vs_ncons(m_range, n_fixed)
+    println("Benchmarking for range of constraints (n=$n_fixed fixed)")
+    res_cons = benchmark_vs_ncons(m_range, n_fixed)
 
-create_benchmark_plots(res_vars, n_range, m_fixed, res_cons, m_range, n_fixed)
+    create_benchmark_plots(res_vars, n_range, m_fixed, res_cons, m_range, n_fixed)
 
-println("\n=== 2D QP solution walk ===")
-H2, g2, A2, b_l2, b_u2, x_l2, x_u2 = generate_test_problem_qp(2, 4)
-plot_qp_walks(H2, g2, A2, b_l2, b_u2, x_l2, x_u2)
+    println("\n=== 2D QP solution walk ===")
+    H2, g2, A2, b_l2, b_u2, x_l2, x_u2 = generate_test_problem_qp(2, 4)
+    plot_qp_walks(H2, g2, A2, b_l2, b_u2, x_l2, x_u2)
+end
