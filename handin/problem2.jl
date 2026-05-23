@@ -7,7 +7,8 @@ using Measures
 
 include("helpers.jl")
 include("revised_simplex.jl")
-include("problem1.jl")
+include("test_problems.jl")
+
 # c. 
 """
 We consider the *convex* QP in the form 
@@ -19,42 +20,6 @@ Since this a convex(!) program then H > 0,
 that is, H is positive definite. 
 """
 
-function generate_test_problem(n, m_a)
-    """
-    Generates H, g,A, b_l, b_u, x_l, x_u of size n. 
-
-    H, g, A, b_l, b_u, x_l, x_u = generate_test_problem(n, m_a)
-    """
-
-
-    M = rand(Uniform(-1, 1), n, n)
-    alpha = rand(Uniform(0.5, 2))
-    H = M * M' + alpha * I  # this ensures that H > 0 
-
-    g = rand(Uniform(-5, 5), n)
-    
-    # Choose which bound constraints are active at start
-    n_active = 2
-    active_idx = randperm(n)[1:n_active]
-
-    x = rand(Uniform(-3, 3), n)
-    diff_x = rand(Uniform(0.5, 3), n)
-    x_l = x .- diff_x
-    x_u = x .+ diff_x
-
-    # Force x to sit exactly on upper bound for active indices
-    x[active_idx] .= x_u[active_idx]
-
-    A = rand(Uniform(-2, 2), n, m_a)
-
-    y = A' * x
-    diff_Ax = rand(Uniform(0, 5), m_a)
-    b_l = y .- diff_Ax
-    b_u = y .+ diff_Ax
-    return H, g, A, b_l, b_u, x_l, x_u
-
-end
- 
 
 """ 
 We will implement a primal active-set algorithm. 
@@ -89,7 +54,7 @@ function convex_active_set_solver(A, b, H, g, x0)
         n_W = size(A_W, 2)
         KKT_matrix = [
             H       -A_W; 
-            -A_W'   zeros(n_W, n_W) # check A.size[2] 
+            -A_W'   zeros(n_W, n_W) 
         ]
 
         KKT_rhs = -[
@@ -155,21 +120,28 @@ function solve_convex_problem(H, g, A, b_l, b_u, x_l, x_u, n_dim)
     # s.t. b_l <= A' x <= b_u, 
     # x_l <= x <= x_u. 
 
+    #convert to standard form
     A_std, b_std, g_std = to_standard_form(g, A, b_l, b_u, x_l, x_u)
     n_std = length(g_std)
 
+    #Define feasible point problem
     A_fp, b_fp, g_fp, x0 = fp_standard_form(A_std, b_std)
+
+    # Run simplex on FP problem
     result_fp = revised_simplex(A_fp, b_fp, g_fp, x0)
     if !result_fp.optimal
         print(result_fp)
         error("Phase 1 failed - problem may be infeasible")
     end
+
+    #Get feasible point (exclude slack vars)
     x0_shifted = result_fp.x[1:size(H)[1]]
-    x0_true = x0_shifted + x_l
+    x0_true = x0_shifted + x_l # recover non-shifted x
 
     I_matrix = Matrix{Float64}(I, n_dim, n_dim)
 
-
+    # Build our problem on standard form but now without slack variables which used only for simplex.
+    # So Ax >= b
     A_hat = [A -A I_matrix -I_matrix]
     b_hat = [b_l; -b_u; x_l; -x_u]
     x_sol, k, converged, x_walk = convex_active_set_solver(A_hat, b_hat, H, g, x0_true)
@@ -195,25 +167,14 @@ end
 
 
 
-function primal_dual_qp_ineq(
-    H::AbstractMatrix,
-    g::AbstractVector,
-    C::AbstractMatrix,
-    d::AbstractVector;
-    x0=nothing,
-    z0=nothing,
-    s0=nothing,
-    tol=1e-6,
-    maxiter=5000,
-    η=0.995
-)
-    n = size(H, 1)
+function primal_dual_qp_ineq(H, g, C, d, x0, z0, s0, tol=1e-6, maxiter=5000, η=0.995)
+    n = size(H, 1) #number of vars
     mc = size(C, 2)  # Number of inequality constraints
     
     # Initialize
-    x = x0 === nothing ? zeros(n) : copy(x0)
-    z = z0 === nothing ? ones(mc) : copy(z0)
-    s = s0 === nothing ? ones(mc) : copy(s0)
+    x = x0 
+    z = z0
+    s = s0
     
     # Ensure strictly positive
     z .= max.(z, 1.0)
@@ -221,13 +182,7 @@ function primal_dual_qp_ineq(
     
     e = ones(mc)
 
-    history = Dict(
-        :μ => Float64[],
-        :dual_res => Float64[],
-        :primal_res => Float64[],
-        :obj => Float64[],
-        :x => Vector{Float64}[]
-    )
+    history = Dict(:μ, :dual_res, :primal_res, :obj, :x)
 
     dual_res   = Inf
     primal_res = Inf
@@ -268,20 +223,17 @@ function primal_dual_qp_ineq(
         S_inv_Z = Diagonal(z ./ s)  # S^{-1}Z
         Hbar = H + C * S_inv_Z * C'
 
-        # Cholesky
-        #F = cholesky(Symmetric(Hbar))
-
-
         F = let
             δ = 0.0
             local fac
             success = false
+            # this is how we handle possible singularity - by adding small value on diagonal
             while !success
                 try
                     fac = cholesky(Symmetric(Hbar + δ * I))
                     success = true
                 catch
-                    δ = (δ == 0.0) ? 1e-8 : δ * 10
+                    δ = (δ == 0.0) ? 1e-8 : δ * 10 
                     δ > 1e-2 && error("Cholesky failed even with δ=$δ regularization")
                 end
             end
@@ -298,7 +250,7 @@ function primal_dual_qp_ineq(
         ds_aff = -(rsz ./ z) - (s ./ z) .* dz_aff
         
         # Maximum step length
-        α_aff = compute_max_step(z, s, dz_aff, ds_aff, 1.0) # multiplies with 1 so all good! 
+        α_aff = compute_max_step(z, s, dz_aff, ds_aff, 1.0) 
         
         # Affine duality gap
         μ_aff = dot(z + α_aff * dz_aff, s + α_aff * ds_aff) / mc
@@ -328,9 +280,6 @@ function primal_dual_qp_ineq(
         push!(history[:x], copy(x))
     end
     
-    println("  Interior point: maxiter=$maxiter reached. " *
-            "tol achieved: dual=$(round(dual_res,sigdigits=3)), " *
-            "primal=$(round(primal_res,sigdigits=3)), μ=$(round(μ,sigdigits=3))")
     return (
         x = x,
         z = z,
@@ -343,8 +292,6 @@ end
 
 function compute_max_step(z, s, dz, ds, η)
     # Find maximum α such that z + α*dz ≥ 0 and s + α*ds ≥ 0
-    
-
     neg_dz = dz .< 0
     if any(neg_dz)
         α_z = minimum(-z[neg_dz] ./ dz[neg_dz])
@@ -365,6 +312,15 @@ end
 
 
 function setup_qp_with_bounds(H, g, A, b_l, b_u, x_l, x_u)
+    """
+    Transform from 
+        min_{x} phi = 1/2 x' H x + g' x 
+        s.t. b_l <= A' x <= b_u, 
+        x_l <= x <= x_u
+    to
+        min_{x} phi = 1/2 x' H x + g' x 
+        s.t. Cx >= d,
+    """
     n = size(H, 1)      
     m = length(b_l)    
     
@@ -398,7 +354,7 @@ function solve_with_commercial(H, g, A, b_l, b_u, x_l, x_u)
     # Variables
     @variable(model, x_l[i] <= x[i=1:n] <= x_u[i])
 
-    # Objective: ½x'Hx + g'x
+    # Objective: 0.5x'Hx + g'x
     @objective(model, Min, 0.5 * x' * H * x + g' * x)
     
     # General linear constraints: b_l ≤ A'x ≤ b_u
@@ -414,19 +370,19 @@ function solve_with_commercial(H, g, A, b_l, b_u, x_l, x_u)
         iter = MOI.get(model, MOI.BarrierIterations())
     )
 end
-## BENCHMARKING
 
+## For plotting
 function benchmark_vs_nvars(n_range, m_fixed)
-    times_lib = Float64[]
-    times_act = Float64[]
-    times_ip  = Float64[]
-    iters_lib = Int[]
-    iters_act = Int[]   # -1 marks non-convergence or failure
-    iters_ip  = Int[]
+    times_lib = []
+    times_act = []
+    times_ip  = []
+    iters_lib = []
+    iters_act = []  
+    iters_ip  = []
 
     for n in n_range
-        println("  Vars sweep: n=$n, m=$m_fixed")
-        H, g, A, b_l, b_u, x_l, x_u = generate_test_problem(n, m_fixed)
+        println("  Variables range: n=$n, m=$m_fixed")
+        H, g, A, b_l, b_u, x_l, x_u = generate_test_problem_qp(n, m_fixed)
 
         # Library (Ipopt)
         try
@@ -435,7 +391,8 @@ function benchmark_vs_nvars(n_range, m_fixed)
             push!(iters_lib, t.value.iter)
         catch e
             println("  Library failed: $e")
-            push!(times_lib, NaN); push!(iters_lib, -1)
+            push!(times_lib, NaN)
+            push!(iters_lib, -1)
         end
 
         # Active-set
@@ -446,7 +403,8 @@ function benchmark_vs_nvars(n_range, m_fixed)
             push!(iters_act, conv ? k : -1)
         catch e
             println("  Active-set failed: $e")
-            push!(times_act, NaN); push!(iters_act, -1)
+            push!(times_act, NaN)
+            push!(iters_act, -1)
         end
 
         # Interior point (include setup in timing for fairness)
@@ -459,7 +417,8 @@ function benchmark_vs_nvars(n_range, m_fixed)
             push!(iters_ip, t.value.iter)
         catch e
             println("  Interior point failed: $e")
-            push!(times_ip, NaN); push!(iters_ip, -1)
+            push!(times_ip, NaN)
+            push!(iters_ip, -1)
         end
     end
 
@@ -469,16 +428,16 @@ function benchmark_vs_nvars(n_range, m_fixed)
 end
 
 function benchmark_vs_ncons(m_range, n_fixed)
-    times_lib = Float64[]
-    times_act = Float64[]
-    times_ip  = Float64[]
-    iters_lib = Int[]
-    iters_act = Int[]
-    iters_ip  = Int[]
+    times_lib = []
+    times_act = []
+    times_ip  = []
+    iters_lib = []
+    iters_act = []
+    iters_ip  = []
 
     for m in m_range
-        println("  Cons sweep: n=$n_fixed, m=$m")
-        H, g, A, b_l, b_u, x_l, x_u = generate_test_problem(n_fixed, m)
+        println("Constraints range: n=$n_fixed, m=$m")
+        H, g, A, b_l, b_u, x_l, x_u = generate_test_problem_qp(n_fixed, m)
 
         try
             t = @timed solve_with_commercial(H, g, A, b_l, b_u, x_l, x_u)
@@ -652,19 +611,19 @@ function plot_qp_walks(H, g, A, b_l, b_u, x_l, x_u)
 end
 
 ## Run benchmarks
-n_range = collect(20:20:300)   # vary variables; m_fixed < min(n_range) = 5
+n_range = collect(20:20:300)   
 m_fixed = 100
 n_fixed = 300
-m_range = collect(10:10:100)   # vary constraints; all m < n_fixed = 20
+m_range = collect(10:10:100)  
 
-println("=== Sweeping number of variables (m=$m_fixed fixed) ===")
-#res_vars = benchmark_vs_nvars(n_range, m_fixed)
+println("Benchmarking for range of variables (m=$m_fixed fixed)")
+res_vars = benchmark_vs_nvars(n_range, m_fixed)
 
-println("=== Sweeping number of constraints (n=$n_fixed fixed) ===")
-#res_cons = benchmark_vs_ncons(m_range, n_fixed)
+println("Benchmarking for range of constraints (n=$n_fixed fixed)")
+res_cons = benchmark_vs_ncons(m_range, n_fixed)
 
-# create_benchmark_plots(res_vars, n_range, m_fixed, res_cons, m_range, n_fixed)
+create_benchmark_plots(res_vars, n_range, m_fixed, res_cons, m_range, n_fixed)
 
 println("\n=== 2D QP solution walk ===")
-H2, g2, A2, b_l2, b_u2, x_l2, x_u2 = generate_test_problem(2, 4)
+H2, g2, A2, b_l2, b_u2, x_l2, x_u2 = generate_test_problem_qp(2, 4)
 plot_qp_walks(H2, g2, A2, b_l2, b_u2, x_l2, x_u2)

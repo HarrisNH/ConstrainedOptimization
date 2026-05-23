@@ -1,8 +1,5 @@
 using LinearAlgebra
-
-
-
-function revised_simplex(A::Matrix{}, b::Vector{}, c::Vector{}, x0::Vector{})
+function revised_simplex(A, b, c, x0)
     m, n = size(A) # constraints, vars
 
     # Derive basis from x0

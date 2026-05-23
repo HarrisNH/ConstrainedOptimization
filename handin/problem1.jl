@@ -118,8 +118,18 @@ function EqualityQPSolver(H, g, A, b, solver)
     return x, lambda
 end
 
+function EqualityQPSolverIPOPT(H, g, A, b)
+    n = size(H, 1)
+    model = Model(optimizer_with_attributes(Ipopt.Optimizer, "tol" => 1e-6, "print_level" => 0))
+    @variable(model, x[1:n])
+    @objective(model, Min, 0.5 * x' * H * x + g' * x)
+    @constraint(model, A' * x .== b)
+    optimize!(model)
+    return value.(x)
+end
+
 """
-Below we test our program functions. 
+Below we test our program functions.
 """
 
 if abspath(PROGRAM_FILE) == @__FILE__
@@ -129,16 +139,15 @@ if abspath(PROGRAM_FILE) == @__FILE__
     density = 0.15
     beta = 0.75
     flag = "sparse"
-    println("density at $(density)")
     H_sparse, g, A_sparse, b = RandomEQP(5, 0.5, 0.5, 0.5, "sparse")
 
     KKT, rhs = construct_KKT(H_sparse, g, A_sparse, b)
     println("eigvals = ", eigvals(Symmetric(Matrix(KKT))))
-    println("KKT matrix")
-    println(KKT)
+
 
     println("computing sparse")
     x_sparse, lambda_sparse = EqualityQPSolver(H_sparse, g, A_sparse, b, "sparse")
+    
     println("computing dense")
     x_dense, lambda_dense = EqualityQPSolver(Matrix(H_sparse), g, Matrix(A_sparse), b, "dense")
 
@@ -148,6 +157,10 @@ if abspath(PROGRAM_FILE) == @__FILE__
     println("")
     display(lambda_sparse)
     display(lambda_dense)
+
+    println("computing ipopt")
+    x_ipopt = EqualityQPSolverIPOPT(H_sparse, g, A_sparse, b)
+    display(x_ipopt)
 
     function timing_study(sizes, betas; alpha=0.5, density=0.15, n_runs=3)
         results = Dict{Float64, Tuple{Vector{Float64}, Vector{Float64}}}()
@@ -179,17 +192,6 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
     sizes = [50, 100, 200, 300, 400, 500,800,1200, 2000]
     betas = [0.25, 0.50, 0.75]
-
-    println("\n=== H density check (density=$(density*100)%, α=$alpha) ===")
-    for β in betas
-        println("  β=$β:")
-        for n_chk in [50, 200, 500, 1000]
-            H_chk, _, A_chk, _ = RandomEQP(n_chk, alpha, density, β, "dense")
-            d_H = count(!iszero, H_chk) / length(H_chk)
-            d_A = count(!iszero, A_chk) / length(A_chk)
-            println("    n=$n_chk  H density=$(round(d_H*100, digits=1))%  A density=$(round(d_A*100, digits=1))%")
-        end
-    end
 
     println("\nRunning timing study...")
     results = timing_study(sizes, betas)
