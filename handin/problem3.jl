@@ -264,7 +264,7 @@ function create_lp_benchmark_plots(res_vars, n_range, m_fixed,
     plot!(p4, m_range, iters_as_float_lp(res_cons.iters_lib), label="Library (Ipopt)", lw=2, marker=:circle)
 
     fig = plot(p1, p2, p3, p4, layout=(2, 2), size=(1200, 900), legend=:topleft)
-    savefig(fig, "lp_benchmark_plot.png")
+    savefig(fig, "handin/im/lp_benchmark_plot.png")
     println("Saved LP benchmark to lp_benchmark_plot.png")
     return fig
 end
@@ -365,7 +365,7 @@ function plot_lp_solution_walks(g, A, b_l, b_u, x_l, x_u, n_dim)
     scatter!(plt, [x_lib[1]], [x_lib[2]],
              color=:green, markersize=12, marker=:star5, label="Ipopt")
 
-    savefig(plt, "lp_solution_walks.png")
+    savefig(plt, "handin/im/lp_solution_walks.png")
     println("Saved solution walk plot to lp_solution_walks.png")
     return plt
 end

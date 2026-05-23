@@ -6,7 +6,6 @@ using Plots
 using Measures
 
 include("helpers.jl")
-include("problem2_presolve.jl")
 include("revised_simplex.jl")
 include("problem1.jl")
 # c. 
@@ -27,19 +26,13 @@ function generate_test_problem(n, m_a)
     H, g, A, b_l, b_u, x_l, x_u = generate_test_problem(n, m_a)
     """
 
-    # TODO: maybe find better numbers 
-    # and discuss the generation method - the idea should be good. 
+
     M = rand(Uniform(-1, 1), n, n)
     alpha = rand(Uniform(0.5, 2))
     H = M * M' + alpha * I  # this ensures that H > 0 
 
     g = rand(Uniform(-5, 5), n)
     
-    # x = rand(n)
-    # diff_x = rand(Uniform(0, 5), n)
-    # x_l = x .- diff_x
-    # x_u = x .+ diff_x
-
     # Choose which bound constraints are active at start
     n_active = 2
     active_idx = randperm(n)[1:n_active]
@@ -53,106 +46,27 @@ function generate_test_problem(n, m_a)
     x[active_idx] .= x_u[active_idx]
 
     A = rand(Uniform(-2, 2), n, m_a)
-    # println("rank(A) = $(rank(A))")
+
     y = A' * x
     diff_Ax = rand(Uniform(0, 5), m_a)
-    # print(size(diff_Ax))
     b_l = y .- diff_Ax
     b_u = y .+ diff_Ax
-    
- 
     return H, g, A, b_l, b_u, x_l, x_u
 
 end
  
-function generate_random_test_problem(n,alpha,density) # following MATLAB implementation 
-    m = 10 * n
 
-    A = sprandn(n, m, density)
-
-    b_l = -rand(m)
-    b_u = rand(m)
-
-    M = sprand(n, n, density)
-    H = M * M' + alpha * I
-    g = randn(n)
-
-    x_l = -ones(n)
-    x_u = ones(n)
-
-    return H, g, b_l, b_u, x_l, x_u, nothing
-end
-
-
-function plot_qp(H, g, A, b_l, b_u, x_l, x_u; x_star=nothing)
-    # ensure dimension is 2
-    n = length(g)
-    if n != 2
-        error("Plotting only supported for 2D problems.")
-    end
-
-    # objective function
-    f(x1, x2) = 0.5 * [x1, x2]' * H * [x1, x2] + g' * [x1, x2]
-
-    # plotting grid
-    x_range = range(x_l[1]-1, x_u[1]+1, length=200)
-    y_range = range(x_l[2]-1, x_u[2]+1, length=200)
-
-    Z = [f(x, y) for y in y_range, x in x_range]
-
-    contour(
-        x_range,
-        y_range,
-        Z,
-        levels=30,
-        linewidth=1,
-        title="Quadratic objective with feasible region",
-        xlabel="x₁",
-        ylabel="x₂"
-    )
-
-    # draw box constraints
-    plot!(
-        [x_l[1], x_u[1], x_u[1], x_l[1], x_l[1]],
-        [x_l[2], x_l[2], x_u[2], x_u[2], x_l[2]],
-        lw=2,
-        label="box constraints"
-    )
-
-    # linear inequality constraints
-    for i in 1:size(A,2)
-        a = A[:,i]
-
-        if abs(a[2]) > 1e-8
-            line(x) = (b_u[i] - a[1]*x) / a[2]
-            plot!(x_range, line.(x_range), linestyle=:dash, label=false)
-
-            line(x) = (b_l[i] - a[1]*x) / a[2]
-            plot!(x_range, line.(x_range), linestyle=:dash, label=false)
-        end
-    end
-
-    # optimal solution marker
-    if x_star !== nothing
-        scatter!([x_star[1]], [x_star[2]], markersize=6, label="solution")
-    end
-    savefig("test_plot.png")
-    return current()
-end
-
-# e and f 
 """ 
 We will implement a primal active-set algorithm. 
 """
-function convex_active_set_solver(A, b, G, g, x0)
+function convex_active_set_solver(A, b, H, g, x0)
     """ 
     This solves the general 
-    min 1/2 x' G x + g' x 
+    min 1/2 x' H x + g' x 
      x
     s.t. A' x >= b. 
+    taking as input the problem and a feasible point
     """
-    
-    # find feasible point (initial point)
 
     tol = 1e-6
     k = 1
@@ -174,22 +88,19 @@ function convex_active_set_solver(A, b, G, g, x0)
 
         n_W = size(A_W, 2)
         KKT_matrix = [
-            G       -A_W; 
+            H       -A_W; 
             -A_W'   zeros(n_W, n_W) # check A.size[2] 
         ]
 
         KKT_rhs = -[
-            G * x_k + g; 
+            H * x_k + g; 
             zeros(n_W) 
         ] 
         res = LDL_solver(KKT_matrix, KKT_rhs)
-        #res = KKT_matrix \ KKT_rhs
-        #print(norm(res1-res,Inf))
         p = res[1:n_vars]
         mu = res[n_vars+1:end]
-        #display(mu)
 
-        if norm(p, Inf) <= tol #||p^*|| = 0 
+        if norm(p, Inf) <= tol 
             if all(x -> x >= 0, mu)
                 x_sol = x_k 
                 mu_sol = mu # should only be those in W that are non-zero rest should be zero
@@ -204,7 +115,7 @@ function convex_active_set_solver(A, b, G, g, x0)
                 push!(x_list, x_k)
 
                 push!(W_not_set, global_index)
-                sort!(W_not_set) # just in case 
+                sort!(W_not_set)
             end 
         else 
             # compute distance 
@@ -231,19 +142,18 @@ function convex_active_set_solver(A, b, G, g, x0)
         end
         
         # update converged 
-        rL = G * x_list[end] + g - A_W * mu
+        rL = H * x_list[end] + g - A_W * mu
         rx = x_list[end] - x_list[end-1]
-        
         converged = norm(rL, Inf) < tol && norm(rx, Inf) < tol && norm(mu, Inf) < tol 
     end
-    
     return x_list[end], k, converged, x_list
 end
 
 function solve_convex_problem(H, g, A, b_l, b_u, x_l, x_u, n_dim)
-    #now rewrite to LP standard form to find feasible point:
-    # Ax=b
-    # x >= 0 
+    # Takes qp convex problem as input in form created by test problem:
+    # min_{x} phi = 1/2 x' H x + g' x 
+    # s.t. b_l <= A' x <= b_u, 
+    # x_l <= x <= x_u. 
 
     A_std, b_std, g_std = to_standard_form(g, A, b_l, b_u, x_l, x_u)
     n_std = length(g_std)
@@ -645,7 +555,7 @@ function create_benchmark_plots(res_vars, n_range, m_fixed,
     plot!(p4, m_range, iters_as_float(res_cons.iters_ip),  label="Interior point", lw=2, marker=:diamond)
 
     fig = plot(p1, p2, p3, p4, layout=(2, 2), size=(1200, 900), legend=:topleft)
-    savefig(fig, "problem2_benchmark.png")
+    savefig(fig, "handin/im/problem2_benchmark.png")
     println("Saved benchmark plots to problem2_benchmark.png")
     return fig
 end
@@ -736,7 +646,7 @@ function plot_qp_walks(H, g, A, b_l, b_u, x_l, x_u)
     scatter!(plt, [x_lib[1]], [x_lib[2]],
              color=:green, markersize=12, marker=:star5, label="Ipopt")
 
-    savefig(plt, "qp_solution_walks.png")
+    savefig(plt, "handin/im/qp_solution_walks.png")
     println("Saved QP solution walk to qp_solution_walks.png")
     return plt
 end

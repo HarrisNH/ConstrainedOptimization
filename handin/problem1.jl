@@ -205,5 +205,5 @@ if abspath(PROGRAM_FILE) == @__FILE__
         plot_titlefontsize = 12,
         titlefont=font(10,"Computer Modern")
     )
-    savefig(fig, "timing_exercise_15pct.png")
+    savefig(fig, "handin/im/timing_exercise_15pct.png")
 end
