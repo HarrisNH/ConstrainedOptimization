@@ -2,7 +2,7 @@ using LinearAlgebra, Plots, SparseArrays
 using JuMP
 using Ipopt
 using Random, Distributions
-
+include("helpers.jl")
 """
 We consider the equality constrained *convex* QP in the form 
 min_{x} phi = 1/2 x' H x + g' x 
@@ -62,18 +62,7 @@ function construct_KKT(H, g, A, b)
 	return KKT_matrix, rhs
 end 
 
-function LDL_solver(KKT_matrix, rhs)
-    """
-    Solver for the KKT system.
-    """
-    if issparse(KKT_matrix)
-        # this defaults to sparse LU and thus handles sparse indefinite systems
-        return KKT_matrix \ rhs
-    else
-        # Bunch-Kaufman is for dense symmetric indefinite systems
-        return bunchkaufman(Symmetric(KKT_matrix)) \ rhs
-    end
-end
+
 
 function EqualityQPSolverLDLdense(H, g, A, b)
     """

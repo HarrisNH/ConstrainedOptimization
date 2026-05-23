@@ -3,7 +3,7 @@ using Random
 # Setting seed for reproducibility
 Random.seed!(1234)
 
-include("../handin/problem1.jl")
+include("../problem1.jl")
 
 # Problem parameters
 n = 50
