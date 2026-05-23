@@ -3,8 +3,16 @@ using JuMP
 using Ipopt
 using Random, Distributions
 
+"""
+We consider the equality constrained *convex* QP in the form 
+min_{x} phi = 1/2 x' H x + g' x 
+s.t. A' x = b. 
+"""
 
 function percent_matrix(distribution, density, n, m)
+    """
+    Contruct random matrices, with a fixed percentage of nonzeros
+    """
     A = zeros(n,m)
     non_zeros = Int(round(density * n*m))
     A_idx = randperm(n*m)[1:non_zeros]
@@ -41,7 +49,9 @@ end
 
 # 4. 
 function construct_KKT(H, g, A, b)
-    # Check! See lecture 5, 5-1 in module 4
+    """
+    Construction of the KKT matrix and corresponding right hand side from the problem. 
+    """
     m_a = size(A)[2]
 	KKT_matrix = [
 		hcat(H, -A);
@@ -53,6 +63,9 @@ function construct_KKT(H, g, A, b)
 end 
 
 function LDL_solver(KKT_matrix, rhs)
+    """
+    Solver for the KKT system.
+    """
     if issparse(KKT_matrix)
         # this defaults to sparse LU and thus handles sparse indefinite systems
         return KKT_matrix \ rhs
@@ -104,6 +117,10 @@ function EqualityQPSolver(H, g, A, b, solver)
     
     return x, lambda
 end
+
+"""
+Below we test our program functions. 
+"""
 
 if abspath(PROGRAM_FILE) == @__FILE__
     # 3. Test problem 
