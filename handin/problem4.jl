@@ -6,23 +6,25 @@ using Random, Distributions
 
 include("problem2.jl")
 include("helpers.jl")
-
+include("test_problems.jl")
 # f
-println("(f)")
-f(x1, x2) = (x1^2 + x2 - 11)^2 + (x1 + x2^2 - 7)^2
-c1(x1, x2) = (x1 + 2)^2 - x2  # >= 0
-c2(x1, x2) = -4*x1 + 10*x2    # >= 0
+function HB_lib_sol()
+    println("(f)")
+    f(x1, x2) = (x1^2 + x2 - 11)^2 + (x1 + x2^2 - 7)^2
+    c1(x1, x2) = (x1 + 2)^2 - x2  # >= 0
+    c2(x1, x2) = -4*x1 + 10*x2    # >= 0
 
-model = Model(Ipopt.Optimizer)
-@variable(model, x1)
-@variable(model, x2)
-@objective(model, Min, f(x1, x2))
-@constraint(model, c1(x1, x2) >= 0)
-@constraint(model, c2(x1, x2) >= 0)
+    model = Model(Ipopt.Optimizer)
+    @variable(model, x1)
+    @variable(model, x2)
+    @objective(model, Min, f(x1, x2))
+    @constraint(model, c1(x1, x2) >= 0)
+    @constraint(model, c2(x1, x2) >= 0)
 
-optimize!(model)
-println("solution x1, x2 = $(value(x1)), $(value(x2))")
-
+    optimize!(model)
+    println("solution x1, x2 = $(value(x1)), $(value(x2))")
+    return value.(x)
+end
 # g
 # helper functions for SQP
 function HL(H_func, x, z)
@@ -189,12 +191,7 @@ function SQP_line_search(func, ineq, x0, z0;
 end
 
 # Test problem for SQP_line_search
-println("\n--- Testing SQP_line_search with Himmelblau function ---")
 
-# x1_opt = 3.0, x2_opt = 2.0 is a minimum of Himmelblau
-# The constraints are:
-# c1: (x1 + 2)^2 - x2 >= 0
-# c2: -4*x1 + 10*x2 >= 0
 
 function test_func(x)
     x1, x2 = x[1], x[2]
@@ -225,20 +222,6 @@ function test_eq(x)
     return [0.0], reshape([0.0; 0.0], 2, 1) 
 end
 
-x0 = [0.0, 0.0]
-z0 = [0.0, 0.0] # Initial multipliers for inequality constraints
-B0 = Matrix{Float64}(I, 2, 2)
-
-x_opt, z_opt, xs, niter, conv = SQP_line_search(
-    test_func, test_ineq, x0, z0;
-    B0=B0, tol=1e-9, MAX_ITER=50
-)
-
-# --- Rosenbrock Examples ---
-println("\n" * "="^50)
-println("EXAMPLE 2: Rosenbrock with Circular Inequality (x^2 + y^2 <= 1)")
-println("="^50)
-
 function rosenbrock_func(x)
     val = (1 - x[1])^2 + 100 * (x[2] - x[1]^2)^2
     grad = [
@@ -264,22 +247,6 @@ function circular_ineq(x)
     return val, reshape(jac, 2, 1)
 end
 
-x0_ros = [0.0, 0.0]
-z0_ros = [0.0]
-
-println("\n> Running BFGS")
-x_bfgs, _, _, n_bfgs, conv_bfgs = SQP_line_search(
-    rosenbrock_func, circular_ineq, x0_ros, z0_ros; 
-    B0=Matrix{Float64}(I, 2, 2), tol=1e-7, MAX_ITER=100
-)
-println("BFGS result: $x_bfgs (Iter: $n_bfgs, Norm: $(conv_bfgs[end]))")
-
-println("\n> Running Analytical...")
-x_ana, _, _, n_ana, conv_ana = SQP_line_search(
-    rosenbrock_func, circular_ineq, x0_ros, z0_ros; 
-    H0=rosenbrock_hess, tol=1e-7, MAX_ITER=100
-)
-println("Analytical result: $x_ana (Iter: $n_ana, Norm: $(conv_ana[end]))")
 
 # --- SQP Trust Region Implementation ---
 function SQP_trust_region(func, ineq, x0, z0, tr0; 
@@ -418,50 +385,83 @@ function SQP_trust_region(func, ineq, x0, z0, tr0;
     return xk, zk, xs, niter, conv
 end
 
-# --- Testing SQP_trust_region ---
-println("\n" * "="^50)
-println("TESTING SQP_trust_region")
-println("="^50)
-
-println("\n--- Testing with Himmelblau function ---")
-x0 = [0.0, 0.0]
-z0 = [0.0, 0.0] 
-tr0 = 1.0
-B0 = Matrix{Float64}(I, 2, 2)
-
-x_opt_tr, z_opt_tr, xs_tr, niter_tr, conv_tr = SQP_trust_region(
-    test_func, test_ineq, x0, z0, tr0;
-    B0=B0, tol=1e-9, MAX_ITER=50
-)
-
-println("\nSQP Trust Region Himmelblau Result:")
-println("x_opt = ", x_opt_tr)
-println("Iterations = ", niter_tr)
-println("Final convergence norm = ", conv_tr[end])
-
-println("\n--- Testing with Rosenbrock (Circular Inequality) ---")
-x0_ros = [0.0, 0.0]
-z0_ros = [0.0]
-tr0_ros = 0.5
-
-println("\n> Running BFGS Trust Region")
-x_tr_bfgs, _, _, n_tr_bfgs, conv_tr_bfgs = SQP_trust_region(
-    rosenbrock_func, circular_ineq, x0_ros, z0_ros, tr0_ros; 
-    B0=Matrix{Float64}(I, 2, 2), tol=1e-7, MAX_ITER=100
-)
-println("BFGS TR result: $x_tr_bfgs (Iter: $n_tr_bfgs, Norm: $(conv_tr_bfgs[end]))")
-
-println("\n> Running Analytical Trust Region")
-x_tr_ana, _, _, n_tr_ana, conv_tr_ana = SQP_trust_region(
-    rosenbrock_func, circular_ineq, x0_ros, z0_ros, tr0_ros; 
-    H0=rosenbrock_hess, tol=1e-7, MAX_ITER=100
-)
-println("Analytical TR result: $x_tr_ana (Iter: $n_tr_ana, Norm: $(conv_tr_ana[end]))")
-
-include("test_problems.jl")
 
 # ─── Run ──────────────────────────────────────────────────────────────────────
 if abspath(PROGRAM_FILE) == @__FILE__
+    x0 = [0.0, 0.0]
+    z0 = [0.0, 0.0] # Initial multipliers for inequality constraints
+    B0 = Matrix{Float64}(I, 2, 2)
+
+    x_opt, z_opt, xs, niter, conv = SQP_line_search(
+        test_func, test_ineq, x0, z0;
+        B0=B0, tol=1e-9, MAX_ITER=50
+    )
+
+    # --- Rosenbrock Examples ---
+    println("\n" * "="^50)
+    println("EXAMPLE 2: Rosenbrock with Circular Inequality (x^2 + y^2 <= 1)")
+    println("="^50)
+
+    x0_ros = [0.0, 0.0]
+    z0_ros = [0.0]
+
+    println("\n> Running BFGS")
+    x_bfgs, _, _, n_bfgs, conv_bfgs = SQP_line_search(
+        rosenbrock_func, circular_ineq, x0_ros, z0_ros; 
+        B0=Matrix{Float64}(I, 2, 2), tol=1e-7, MAX_ITER=100
+    )
+    println("BFGS result: $x_bfgs (Iter: $n_bfgs, Norm: $(conv_bfgs[end]))")
+
+    println("\n> Running Analytical...")
+    x_ana, _, _, n_ana, conv_ana = SQP_line_search(
+        rosenbrock_func, circular_ineq, x0_ros, z0_ros; 
+        H0=rosenbrock_hess, tol=1e-7, MAX_ITER=100
+    )
+    println("Analytical result: $x_ana (Iter: $n_ana, Norm: $(conv_ana[end]))")
+
+
+    # --- Testing SQP_trust_region ---
+    println("\n" * "="^50)
+    println("TESTING SQP_trust_region")
+    println("="^50)
+
+    println("\n--- Testing with Himmelblau function ---")
+    x0 = [0.0, 0.0]
+    z0 = [0.0, 0.0] 
+    tr0 = 1.0
+    B0 = Matrix{Float64}(I, 2, 2)
+
+    x_opt_tr, z_opt_tr, xs_tr, niter_tr, conv_tr = SQP_trust_region(
+        test_func, test_ineq, x0, z0, tr0;
+        B0=B0, tol=1e-9, MAX_ITER=50
+    )
+
+    println("\nSQP Trust Region Himmelblau Result:")
+    println("x_opt = ", x_opt_tr)
+    println("Iterations = ", niter_tr)
+    println("Final convergence norm = ", conv_tr[end])
+
+    println("\n--- Testing with Rosenbrock (Circular Inequality) ---")
+    x0_ros = [0.0, 0.0]
+    z0_ros = [0.0]
+    tr0_ros = 0.5
+
+    println("\n> Running BFGS Trust Region")
+    x_tr_bfgs, _, _, n_tr_bfgs, conv_tr_bfgs = SQP_trust_region(
+        rosenbrock_func, circular_ineq, x0_ros, z0_ros, tr0_ros; 
+        B0=Matrix{Float64}(I, 2, 2), tol=1e-7, MAX_ITER=100
+    )
+    println("BFGS TR result: $x_tr_bfgs (Iter: $n_tr_bfgs, Norm: $(conv_tr_bfgs[end]))")
+
+    println("\n> Running Analytical Trust Region")
+    x_tr_ana, _, _, n_tr_ana, conv_tr_ana = SQP_trust_region(
+        rosenbrock_func, circular_ineq, x0_ros, z0_ros, tr0_ros; 
+        H0=rosenbrock_hess, tol=1e-7, MAX_ITER=100
+    )
+    println("Analytical TR result: $x_tr_ana (Iter: $n_tr_ana, Norm: $(conv_tr_ana[end]))")
+
+
+
     n_range = collect(2:2:16)
     m_fixed = 3
     n_fixed = 5
@@ -474,3 +474,4 @@ if abspath(PROGRAM_FILE) == @__FILE__
     res_m = benchmark_sqp_vs_m(m_range, n_fixed=n_fixed, n_trials=3)
 
     create_sqp_benchmark_plots(res_n, n_range, m_fixed, res_m, m_range, n_fixed)
+end
