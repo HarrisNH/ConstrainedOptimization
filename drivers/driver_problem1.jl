@@ -20,7 +20,9 @@ x_s, lambda_s = EqualityQPSolver(H, g, A, b, "sparse")
 # Solving the problem as dense
 x_d, lambda_d = EqualityQPSolver(H, g, A, b, "dense")
 
-# Output
-println("Solution x:")
-println(x)
-
+# Output solution
+println("Optimal point when solved as sparse:")
+println(x_s)
+println("")
+println("Optimal point when solved as dense:")
+println(x_d)
