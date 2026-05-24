@@ -41,4 +41,4 @@ println("")
 println("2-norm of the error (assuming IPOPT gives the correct solution)")
 println(norm(x_tr-x_lib)," and ",norm(x_ls-x_lib))
 
-println("")
+println("Results for Rosenbrock")

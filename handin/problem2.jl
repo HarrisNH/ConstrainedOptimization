@@ -381,12 +381,12 @@ end
 
 ## For plotting
 function benchmark_vs_nvars(n_range, m_fixed)
-    times_lib = []
-    times_act = []
-    times_ip  = []
-    iters_lib = []
-    iters_act = []  
-    iters_ip  = []
+    times_lib = Float64[]
+    times_act = Float64[]
+    times_ip  = Float64[]
+    iters_lib = Int[]
+    iters_act = Int[]
+    iters_ip  = Int[]
 
     for n in n_range
         println("  Variables range: n=$n, m=$m_fixed")
@@ -436,12 +436,12 @@ function benchmark_vs_nvars(n_range, m_fixed)
 end
 
 function benchmark_vs_ncons(m_range, n_fixed)
-    times_lib = []
-    times_act = []
-    times_ip  = []
-    iters_lib = []
-    iters_act = []
-    iters_ip  = []
+    times_lib = Float64[]
+    times_act = Float64[]
+    times_ip  = Float64[]
+    iters_lib = Int[]
+    iters_act = Int[]
+    iters_ip  = Int[]
 
     for m in m_range
         println("Constraints range: n=$n_fixed, m=$m")

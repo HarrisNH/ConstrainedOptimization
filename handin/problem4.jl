@@ -23,7 +23,7 @@ function HB_lib_sol()
 
     optimize!(model)
     println("solution x1, x2 = $(value(x1)), $(value(x2))")
-    return value.(x)
+    return [value(x1), value(x2)]
 end
 # g
 # helper functions for SQP

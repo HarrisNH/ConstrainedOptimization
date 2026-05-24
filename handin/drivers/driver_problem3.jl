@@ -1,4 +1,6 @@
 using Random
+using LinearAlgebra
+using JuMP, Ipopt
 
 # Setting seed for reproducibility
 Random.seed!(1234)

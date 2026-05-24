@@ -41,80 +41,84 @@ function library_solver_lp(g, A, b_l, b_u, x_l, x_u)
 end
 
 #IP algorithm for LP problem
+"""
+Primal-dual interior point method for LP in standard form 
+"""
 function primal_dual_interior_LP(g, A, b, x0, n_orig, x_l)
     m, n = size(A)
     maxiter = 10000
     tol = 1.0e-6
 
-    
     lambda = ones(n, 1)
     mu = zeros(m, 1)
     x = x0
 
     #residuals
-    rL = g - A' * mu - lambda 
-    rA = A * x0 - b 
+    rL = g - A' * mu - lambda
+    rA = A * x0 - b
     rC = x0 .* lambda
     s = sum(rC) / n
 
     #convergence test
     converged = (norm(rL, Inf) < tol) && (norm(rA, Inf) < tol) && (norm(s, Inf) < tol)
     k = 0
-    history = [x0[1:n_orig] .+ x_l]  # store original-space iterates
-    
+    history = [x0[1:n_orig] .+ x_l]
+
     while !converged & (k < maxiter)
         k = k + 1
-        
+
+        # form and factor the normal equations matrix
         xDivlambda = vec(x ./ lambda)
         H = A * diagm(xDivlambda) * A'
-
         F = factorize_H(H)
-        
+
+        # affine (predictor) step
         tmp = (x .* rL + rC) ./ lambda
         rhs = -rA + A * tmp
-
         dmu = isnothing(F) ? H \ rhs : F \ rhs
-        dx = xDivlambda .* (A' * dmu) - tmp 
+        dx = xDivlambda .* (A' * dmu) - tmp
         dlambda = -(rC + lambda .* dx) ./ x
 
-        idx = findall(x -> x < 0.0, dx) 
-        alpha = minimum([1.0; .-x[idx] ./ dx[idx]])
-        idx = findall(x -> x < 0.0, dlambda)
-        beta = minimum([1.0; .-lambda[idx] ./ dlambda[idx]])
-
-        x_aff = x + alpha * dx 
-        lambda_aff = lambda + beta * dlambda
-        s_aff = sum(x_aff .* lambda_aff) / n 
-
-        sigma = (s_aff / s)^3 
-        tau = sigma * s 
-
-        rC = rC + dx .* dlambda .- tau 
-
-        tmp = (x .* rL + rC) ./ lambda
-        rhs = -rA + A * tmp 
-
-        dmu = isnothing(F) ? H \ rhs : F \ rhs
-        dx = xDivlambda .* (A' * dmu) - tmp 
-        dlambda = -(rC + lambda .* dx) ./ x
-        
+        # max step lengths that keep x, lambda > 0
         idx = findall(x -> x < 0.0, dx)
         alpha = minimum([1.0; .-x[idx] ./ dx[idx]])
         idx = findall(x -> x < 0.0, dlambda)
         beta = minimum([1.0; .-lambda[idx] ./ dlambda[idx]])
 
+        # centering parameter
+        x_aff = x + alpha * dx
+        lambda_aff = lambda + beta * dlambda
+        s_aff = sum(x_aff .* lambda_aff) / n
+        sigma = (s_aff / s)^3
+        tau = sigma * s
+
+        # corrected complementarity residual and corrector step
+        rC = rC + dx .* dlambda .- tau
+        tmp = (x .* rL + rC) ./ lambda
+        rhs = -rA + A * tmp
+        dmu = isnothing(F) ? H \ rhs : F \ rhs
+        dx = xDivlambda .* (A' * dmu) - tmp
+        dlambda = -(rC + lambda .* dx) ./ x
+
+        # step length for combined direction
+        idx = findall(x -> x < 0.0, dx)
+        alpha = minimum([1.0; .-x[idx] ./ dx[idx]])
+        idx = findall(x -> x < 0.0, dlambda)
+        beta = minimum([1.0; .-lambda[idx] ./ dlambda[idx]])
+
+        # update with safety margin to stay strictly interior
         eta = 0.995
-        x = x + (eta * alpha) * dx 
-        mu = mu + (eta * beta) * dmu 
+        x = x + (eta * alpha) * dx
+        mu = mu + (eta * beta) * dmu
         lambda = lambda + (eta * beta) * dlambda
 
         rL = g - A' * mu - lambda
-        rA = A * x - b 
+        rA = A * x - b
         rC = x .* lambda
-        s = sum(rC) / n 
-        
+        s = sum(rC) / n
+
         push!(history, x[1:n_orig] .+ x_l)
-        converged = (norm(rL, Inf) < tol) && (norm(rA, Inf) < tol) && (norm(s, Inf) < tol) 
+        converged = (norm(rL, Inf) < tol) && (norm(rA, Inf) < tol) && (norm(s, Inf) < tol)
     end
 
     return x, mu, lambda, history, k
