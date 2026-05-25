@@ -28,10 +28,8 @@ end
 # g
 # helper functions for SQP
 function HL(H_func, x, z)
-
     Hf, Hg = H_func(x)
     L = copy(Hf)
-
     for i in 1:length(z)
         L .-= z[i] .* Hg[i]
     end
@@ -39,10 +37,8 @@ function HL(H_func, x, z)
 end
 
 function dL_func(x, z, df, dg)
-
     dgk = dg(x)
     L = df(x)
-
     if !isempty(z)
         L .-= dgk * z
     end
@@ -77,7 +73,7 @@ function solve_QP_ip(Hk, dfk, dgk, gk; xl=nothing, xu=nothing)
 
     zhat = result.z[1:m_ineq]
 
-    return result.x, zhat   # p_opt, multipliers
+    return result.x, zhat 
 end
 
 function SQP_line_search(func, ineq, x0, z0; 
@@ -191,8 +187,6 @@ function SQP_line_search(func, ineq, x0, z0;
 end
 
 # Test problem for SQP_line_search
-
-
 function test_func(x)
     x1, x2 = x[1], x[2]
     # Himmelblau's function
@@ -210,7 +204,6 @@ function test_ineq(x)
         (x1 + 2)^2 - x2,
         -4*x1 + 10*x2
     ] 
-    # each COLUMN is the gradient of one constraint
     jac = [
         2*(x1 + 2)  -4.0;
         -1.0         10.0
@@ -243,7 +236,7 @@ end
 
 function circular_ineq(x)
     val = [1.0 - x[1]^2 - x[2]^2]
-    jac = [-2*x[1]; -2*x[2]] # gradient as column vector
+    jac = [-2*x[1]; -2*x[2]] 
     return val, reshape(jac, 2, 1)
 end
 
@@ -256,8 +249,6 @@ function SQP_trust_region(func, ineq, x0, z0, tr0;
     Computes a solution to the non-linear constrained optimisation problem:
         min_x f(x)  
         s.t. g(x) >= 0, xl <= x <= xu
-
-    Using a Trust Region SQP approach based on the SQPTR algorithm.
     """
     if H0 !== nothing
         H = x -> begin

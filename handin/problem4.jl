@@ -77,9 +77,10 @@ function solve_QP_ip(Hk, dfk, dgk, gk; xl=nothing, xu=nothing)
 
     zhat = result.z[1:m_ineq]
 
-    return result.x, zhat   # p_opt, multipliers
+    return result.x, zhat 
 end
 
+# LINE SEARCH 
 function SQP_line_search(func, ineq, x0, z0; 
         xl=nothing, xu=nothing, H0=nothing, B0=nothing, 
         rho=0.5, eta=0.1, tau=0.9, l0=100.0, MAX_ITER=1000, tol=1e-6)
@@ -191,11 +192,9 @@ function SQP_line_search(func, ineq, x0, z0;
 end
 
 # Test problem for SQP_line_search
-
-
+# First Himmelblau and corresponding constraints
 function test_func(x)
     x1, x2 = x[1], x[2]
-    # Himmelblau's function
     val = (x1^2 + x2 - 11)^2 + (x1 + x2^2 - 7)^2
     grad = [
         4*x1*(x1^2 + x2 - 11) + 2*(x1 + x2^2 - 7),
@@ -210,7 +209,6 @@ function test_ineq(x)
         (x1 + 2)^2 - x2,
         -4*x1 + 10*x2
     ] 
-    # each COLUMN is the gradient of one constraint
     jac = [
         2*(x1 + 2)  -4.0;
         -1.0         10.0
@@ -237,18 +235,17 @@ function rosenbrock_hess(x)
         2 - 400*(x2 - x1^2) + 800*x1^2   -400*x1;
         -400*x1                          200.0
     ]
-    Hg = [[-2.0 0.0; 0.0 -2.0]] # for 1 - x1^2 - x2^2
+    Hg = [[-2.0 0.0; 0.0 -2.0]] 
     return Hf, Hg
 end
 
 function circular_ineq(x)
     val = [1.0 - x[1]^2 - x[2]^2]
-    jac = [-2*x[1]; -2*x[2]] # gradient as column vector
+    jac = [-2*x[1]; -2*x[2]] 
     return val, reshape(jac, 2, 1)
 end
 
-
-# --- SQP Trust Region Implementation ---
+# TRUST REGION
 function SQP_trust_region(func, ineq, x0, z0, tr0; 
         xl=nothing, xu=nothing, H0=nothing, B0=nothing, 
         rho=0.5, eta=0.1, gamma1=1.5, gamma2=0.5, l0=100.0, MAX_ITER=100, tol=1e-6)
@@ -256,8 +253,6 @@ function SQP_trust_region(func, ineq, x0, z0, tr0;
     Computes a solution to the non-linear constrained optimisation problem:
         min_x f(x)  
         s.t. g(x) >= 0, xl <= x <= xu
-
-    Using a Trust Region SQP approach based on the SQPTR algorithm.
     """
     if H0 !== nothing
         H = x -> begin
@@ -298,7 +293,6 @@ function SQP_trust_region(func, ineq, x0, z0, tr0;
         fk, dfk = func(xk)
         gk, dgk = ineq(xk)
 
-        # Penalty parameter
         mu = lk
 
         # Effective bounds for the trust region subproblem: ||p||_inf <= trk
@@ -312,25 +306,21 @@ function SQP_trust_region(func, ineq, x0, z0, tr0;
             xu_p = min.(xu_p, xu .- xk)
         end
 
-        # Solve QP subproblem
         pk, zhat = solve_QP_ip(Hk, dfk, dgk, gk, xl=xl_p, xu=xu_p)
 
         # Actual reduction
         xk1_candidate = xk + pk
         fk1, _ = func(xk1_candidate)
         gk1, _ = ineq(xk1_candidate)
-        
         ared = (fk + mu * norm(min.(gk, 0), 1)) - (fk1 + mu * norm(min.(gk1, 0), 1))
         
-        # Predicted reduction (using the model at xk)
-        # q(p) = fk + dfk'p + 0.5 p'Hk p + mu * norm(min(gk + dgk'p, 0), 1)
-        # pred = q(0) - q(p)
+        # Predicted reduction 
         pred = -(dfk' * pk + 0.5 * pk' * Hk * pk + mu * (norm(min.(gk + dgk' * pk, 0), 1) - norm(min.(gk, 0), 1)))
 
-        ratio = ared / pred
+        rho_k = ared / pred
         
         step_accepted = false
-        if ratio > eta
+        if rho_k > eta
             xk1 = xk1_candidate
             trk *= gamma1
             step_accepted = true
@@ -344,7 +334,6 @@ function SQP_trust_region(func, ineq, x0, z0, tr0;
 
         push!(xs, copy(xk1))
 
-        # Check for convergence
         res = [dL_func(xk1, zk1, df_eval, dg_eval); max.(-g_eval(xk1), 0)] 
         curr_conv = norm(res, Inf)
         push!(conv, curr_conv)
@@ -386,10 +375,10 @@ function SQP_trust_region(func, ineq, x0, z0, tr0;
 end
 
 
-# ─── Run ──────────────────────────────────────────────────────────────────────
+# RUN 
 if abspath(PROGRAM_FILE) == @__FILE__
     x0 = [0.0, 0.0]
-    z0 = [0.0, 0.0] # Initial multipliers for inequality constraints
+    z0 = [0.0, 0.0] # Initial multipliers for inequality constraints, that is, lambda^{(0)}
     B0 = Matrix{Float64}(I, 2, 2)
 
     x_opt, z_opt, xs, niter, conv = SQP_line_search(
@@ -397,22 +386,20 @@ if abspath(PROGRAM_FILE) == @__FILE__
         B0=B0, tol=1e-9, MAX_ITER=50
     )
 
-    # --- Rosenbrock Examples ---
-    println("\n" * "="^50)
-    println("EXAMPLE 2: Rosenbrock with Circular Inequality (x^2 + y^2 <= 1)")
-    println("="^50)
+    # Rosenbrock 
+    println("EXAMPLE 2: Rosenbrock with Circular Inequality x^2 + y^2 <= 1")
 
     x0_ros = [0.0, 0.0]
     z0_ros = [0.0]
 
-    println("\n> Running BFGS")
+    println("\nRunning BFGS")
     x_bfgs, _, _, n_bfgs, conv_bfgs = SQP_line_search(
         rosenbrock_func, circular_ineq, x0_ros, z0_ros; 
         B0=Matrix{Float64}(I, 2, 2), tol=1e-7, MAX_ITER=100
     )
     println("BFGS result: $x_bfgs (Iter: $n_bfgs, Norm: $(conv_bfgs[end]))")
 
-    println("\n> Running Analytical...")
+    println("\nRunning Analytical...")
     x_ana, _, _, n_ana, conv_ana = SQP_line_search(
         rosenbrock_func, circular_ineq, x0_ros, z0_ros; 
         H0=rosenbrock_hess, tol=1e-7, MAX_ITER=100
@@ -420,12 +407,10 @@ if abspath(PROGRAM_FILE) == @__FILE__
     println("Analytical result: $x_ana (Iter: $n_ana, Norm: $(conv_ana[end]))")
 
 
-    # --- Testing SQP_trust_region ---
-    println("\n" * "="^50)
+    # Testing trust region 
     println("TESTING SQP_trust_region")
-    println("="^50)
 
-    println("\n--- Testing with Himmelblau function ---")
+    println("\nTesting with Himmelblau function")
     x0 = [0.0, 0.0]
     z0 = [0.0, 0.0] 
     tr0 = 1.0
@@ -446,20 +431,19 @@ if abspath(PROGRAM_FILE) == @__FILE__
     z0_ros = [0.0]
     tr0_ros = 0.5
 
-    println("\n> Running BFGS Trust Region")
+    println("\n>Running BFGS Trust Region")
     x_tr_bfgs, _, _, n_tr_bfgs, conv_tr_bfgs = SQP_trust_region(
         rosenbrock_func, circular_ineq, x0_ros, z0_ros, tr0_ros; 
         B0=Matrix{Float64}(I, 2, 2), tol=1e-7, MAX_ITER=100
     )
     println("BFGS TR result: $x_tr_bfgs (Iter: $n_tr_bfgs, Norm: $(conv_tr_bfgs[end]))")
 
-    println("\n> Running Analytical Trust Region")
+    println("\n>Running Analytical Trust Region")
     x_tr_ana, _, _, n_tr_ana, conv_tr_ana = SQP_trust_region(
         rosenbrock_func, circular_ineq, x0_ros, z0_ros, tr0_ros; 
         H0=rosenbrock_hess, tol=1e-7, MAX_ITER=100
     )
     println("Analytical TR result: $x_tr_ana (Iter: $n_tr_ana, Norm: $(conv_tr_ana[end]))")
-
 
 
     n_range = collect(2:2:16)
